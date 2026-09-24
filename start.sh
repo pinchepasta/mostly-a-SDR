@@ -113,7 +113,7 @@ do_check_file_existance()
 do_freq_setup()
 {
 
-if FREQ=$(whiptail --backtitle "mostly-a-SDR" --inputbox "Enter output frequency (in MHz). Current is $OUTPUT_FREQ MHz" 8 78 $OUTPUT_FREQ --title "mostly-a-SDR transmit frequency" 3>&1 1>&2 2>&3); then
+if FREQ=$(whiptail --backtitle "mostly-a-SDR - Made for mostlyawesome.de" --inputbox "Enter output frequency (in MHz). Current is $OUTPUT_FREQ MHz" 8 78 $OUTPUT_FREQ --title "mostly-a-SDR transmit frequency" 3>&1 1>&2 2>&3); then
 	OUTPUT_FREQ=$FREQ
 fi
 
@@ -444,7 +444,7 @@ do_freq_setup
  while [ true ]
     do
 
-	menuchoice=$(whiptail --backtitle "mostly-a-SDR" --default-item "$LAST_ITEM" --title "mostly-a-SDR on ""$OUTPUT_FREQ"" MHz" --menu "Range frequency: 50kHz-1GHz. Choose your test:" 20 82 13 \
+	menuchoice=$(whiptail --backtitle "mostly-a-SDR - Made for mostlyawesome.de" --default-item "$LAST_ITEM" --title "mostly-a-SDR on ""$OUTPUT_FREQ"" MHz" --menu "Range frequency: 50kHz-1GHz. Choose your test:" 20 82 13 \
  	"F Set frequency" "Modify frequency (actual $OUTPUT_FREQ MHz)" \
 	"0 Tune" "Carrier" \
     "1 Chirp" "Moving carrier" \
@@ -465,7 +465,7 @@ do_freq_setup
  	3>&2 2>&1 1>&3)
 		RET=$?
 		if [ $RET -eq 1 ]; then
-			whiptail --backtitle "mostly-a-SDR" --title "Bye bye" --msgbox "Thanks for using mostly-a-SDR!" 8 78
+			whiptail --backtitle "mostly-a-SDR - Made for mostlyawesome.de" --title "Bye bye" --msgbox "Thanks for using mostly-a-SDR!" 8 78
     		exit 0
 		elif [ $RET -eq 0 ]; then
 			case "$menuchoice" in

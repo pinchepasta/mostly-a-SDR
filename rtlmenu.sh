@@ -31,7 +31,7 @@ compactbutton=black,green
 # Every whiptail dialog below gets the same "mostly-a-SDR" backtitle as start.sh.
 whiptail()
 {
-	command whiptail --backtitle "mostly-a-SDR" "$@"
+	command whiptail --backtitle "mostly-a-SDR - Made for mostlyawesome.de" "$@"
 }
 
 # Green-gradient block logo inside a neon-pink "terminal" frame (ANSI 256-color).
