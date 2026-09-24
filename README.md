@@ -14,6 +14,9 @@ But that's not all, the toolkit can do a lot more.
 Just git clone, unzip and go to /mostly-a-SDR and do chmod +x install.sh afterwards just type in ./install.sh and let it do it's thing.
 If that succeeds, just type in ./start.sh to start the application.
 
+<h2>What do I need to get started?</h2>
+
+Just your Raspberry Pi 3(b) / Raspberry Pi 4 or a Raspberry Pi 5. You can start to transmit with just this device alone, but it makes sense to throw an RTLSDR into the mix, to gain Rx functionality.
 
 <h2>That's it?</h2>
 Nah, I'm going to write a more detailed readme soon. I'm on vacation.
