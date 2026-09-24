@@ -29,3 +29,6 @@ Just your Raspberry Pi 3(b) / Raspberry Pi 4 or a Raspberry Pi 5. You can start 
 Nah, I'm going to write a more detailed readme soon. I'm on vacation.
 
 By the way: <b>Next version will have full BLESP v3 integration and support, to seamlessly control your mostly-a-SDR device from your phone with a nice looking gui. You'll also be able to bruteforce the standard protocols for gates and garagedoors.</b>
+
+<h2>Important:</h2>
+This tool transmits rf signals and thus it's pretty easy to break the law. Check your local laws, you might need a license, in other places it's totally illegal, you need to use a faraday cage to test it. Always make sure you know your local laws before transmitting anything with it! And you should clean the signal, otherwise you might produce harmonics.
