@@ -1,4 +1,76 @@
-#!/bin/sh
+#!/bin/bash
+
+# ----------------------------------------------------------
+# mostly-a-SDR theme: neon green / neon pink on black
+# (same palette, banner and backtitle as start.sh)
+# ----------------------------------------------------------
+export NEWT_COLORS='
+root=green,black
+border=magenta,black
+window=green,black
+shadow=black,black
+title=magenta,black
+button=black,magenta
+actbutton=black,green
+checkbox=green,black
+actcheckbox=black,green
+entry=green,black
+label=green,black
+listbox=green,black
+actlistbox=black,green
+textbox=green,black
+acttextbox=black,green
+helpline=magenta,black
+roottext=magenta,black
+emptyscale=black,green
+fullscale=black,magenta
+disabledentry=magenta,black
+compactbutton=black,green
+'
+
+# Every whiptail dialog below gets the same "mostly-a-SDR" backtitle as start.sh.
+whiptail()
+{
+	command whiptail --backtitle "mostly-a-SDR" "$@"
+}
+
+# Green-gradient block logo inside a neon-pink "terminal" frame (ANSI 256-color).
+# Only emitted to an interactive terminal so piped / logged output stays clean.
+show_banner()
+{
+	[ -t 1 ] || return 0
+
+	local pink=$'\033[38;5;198m'
+	local dim=$'\033[38;5;240m'
+	local reset=$'\033[0m'
+	local grad=(157 121 84 47 41 35 157 121 84 47 41 35)
+	local line i=0
+
+	printf '%s' "$pink"
+	printf '┌─[ root@mostly-a-sdr:~# ./ft8 --pift8 ]─────────────────────────────░▒▓█▓▒░─┐\n'
+	printf '%s│%s\n' "$pink" "$reset"
+	while IFS= read -r line; do
+		printf '%s│ %s\033[1;38;5;%sm%s%s\n' "$pink" "$reset" "${grad[i]}" "$line" "$reset"
+		i=$((i + 1))
+	done <<'BANNER'
+███╗   ███╗ ██████╗ ███████╗████████╗██╗  ██╗   ██╗
+████╗ ████║██╔═══██╗██╔════╝╚══██╔══╝██║  ╚██╗ ██╔╝
+██╔████╔██║██║   ██║███████╗   ██║   ██║   ╚████╔╝█████╗
+██║╚██╔╝██║██║   ██║╚════██║   ██║   ██║    ╚██╔╝ ╚════╝
+██║ ╚═╝ ██║╚██████╔╝███████║   ██║   ███████╗██║
+╚═╝     ╚═╝ ╚═════╝ ╚══════╝   ╚═╝   ╚══════╝╚═╝
+       █████╗       ███████╗██████╗ ██████╗
+      ██╔══██╗      ██╔════╝██╔══██╗██╔══██╗
+      ███████║█████╗███████╗██║  ██║██████╔╝
+      ██╔══██║╚════╝╚════██║██║  ██║██╔══██╗
+      ██║  ██║      ███████║██████╔╝██║  ██║
+      ╚═╝  ╚═╝      ╚══════╝╚═════╝ ╚═╝  ╚═╝
+BANNER
+	printf '%s│%s\n' "$pink" "$reset"
+	printf '%s│ %s[%s+%s]%s ft8 qso helper :: raspberry pi :: pift8\n' "$pink" "$dim" "$pink" "$dim" "$reset"
+	printf '%s│ %s[%s+%s]%s tx armed. know your local laws. transmit responsibly.\n' "$pink" "$dim" "$pink" "$dim" "$reset"
+	printf '%s└─░▒▓█▓▒░────────────────────────────────────────────────────────────░▒▓█▓▒░─┘%s\n' "$pink" "$reset"
+}
 
 status="0"
 OUTPUT_FREQ=14.074
@@ -32,7 +104,7 @@ do_slot_choice()
 do_freq_setup()
 {
 
-    if FREQ=$(whiptail --inputbox "Choose FT8 output Frequency (in MHZ) Default is 14.074MHZ" 8 78 $OUTPUT_FREQ --title "Transmit Frequency" 3>&1 1>&2 2>&3); then
+    if FREQ=$(whiptail --inputbox "Choose FT8 output Frequency (in MHz). Default is 14.074 MHz" 8 78 $OUTPUT_FREQ --title "mostly-a-SDR transmit frequency" 3>&1 1>&2 2>&3); then
         OUTPUT_FREQ=$FREQ
     fi
 
@@ -50,7 +122,7 @@ do_freq_setup()
 do_status()
 {
 	LAST_ITEM="$menuchoice"
-	whiptail --title "Processing ""$LAST_ITEM"" on ""$OUTPUT_FREQ""MHZ" --msgbox "Running" 8 78
+	whiptail --title "Transmit ""$LAST_ITEM"" on ""$OUTPUT_FREQ"" MHz" --msgbox "Transmitting" 8 78
 	
 }
 
@@ -84,16 +156,17 @@ do_freetext()
     
 }
 
+show_banner
 do_freq_setup
 
  while [ "$status" -eq 0 ]
     do
 
- menuchoice=$(whiptail --default-item "$LAST_ITEM" --title "FT8 with rpitx Slot $TIMESLOT Offset $OUTPUT_OFFSET" --menu "Choose your item" 20 82 12 \
-	"0 CQ" "Calling CQ on $OUTPUT_FREQ" \
+ menuchoice=$(whiptail --default-item "$LAST_ITEM" --title "mostly-a-SDR FT8 on ""$OUTPUT_FREQ"" MHz - Slot $TIMESLOT Offset $OUTPUT_OFFSET Hz" --menu "FT8 QSO helper. Choose your item:" 20 82 12 \
+	"0 CQ" "Calling CQ on $OUTPUT_FREQ MHz" \
 	"1 ENTER OM" "Input OM call" \
     "2 dB" "Answer Db" \
-	"3 RRR" "Answer RRR "\
+	"3 RRR" "Answer RRR" \
 	"4 Grid" "Answer with grid" \
 	"5 R+dB" "Answer with R+level" \
     "6 73" "Answer with 73" \
@@ -122,7 +195,7 @@ do_freq_setup
         do_slot_choice 
          LAST_ITEM="0 CQ" ;;
     	*)	 status=1
-		whiptail --title "Bye bye" --msgbox "Thanks for using rpitx!" 8 78
+		whiptail --title "Bye bye" --msgbox "Thanks for using mostly-a-SDR!" 8 78
 		;;
         esac
     done
