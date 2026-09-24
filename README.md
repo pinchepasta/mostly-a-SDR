@@ -27,4 +27,5 @@ Just your Raspberry Pi 3(b) / Raspberry Pi 4 or a Raspberry Pi 5. You can start 
 
 <h2>That's it?</h2>
 Nah, I'm going to write a more detailed readme soon. I'm on vacation.
+
 By the way: <b>Next version will have full BLESP v3 integration and support, to seamlessly control your mostly-a-SDR device from your phone with a nice looking gui.</b>
