@@ -119,6 +119,18 @@ fi
 
 }
 
+# Reads the "Frequency:" line out of a Flipper Zero .sub RAW file and prints
+# it in MHz (e.g. "440.170000"). Prints nothing if the field is missing or
+# not a plain integer Hz value, so callers can fall back gracefully.
+do_sub_file_frequency_mhz()
+{
+	local file="$1" hz
+	hz=$(tr -d '\r' < "$file" | awk -F: '/^Frequency:/ {gsub(/[^0-9]/, "", $2); print $2; exit}')
+	if [[ "$hz" =~ ^[0-9]+$ ]]; then
+		awk -v hz="$hz" 'BEGIN{printf "%.6f", hz / 1000000}'
+	fi
+}
+
 do_file_choose() {
 	local file_type_info="$1"
 	local directory="$2"
@@ -429,8 +441,9 @@ do_stop_transmit()
 
 do_status()
 {
+	local freq_display="${1:-$OUTPUT_FREQ}"
 	LAST_ITEM="$menuchoice"
-	whiptail --title "Transmit ""$LAST_ITEM"" on ""$OUTPUT_FREQ"" MHz" --msgbox "Transmitting" 8 78
+	whiptail --title "Transmit ""$LAST_ITEM"" on ""$freq_display"" MHz" --msgbox "Transmitting" 8 78
 	do_stop_transmit
 }
 
@@ -595,6 +608,7 @@ do_freq_setup
 
 			15\ *) do_file_choose "Flipper Zero .sub RAW capture" "$SUB_FILES_LOCATION" '\.sub$'
 			if [ $abort_action -eq 0 ]; then
+				SUB_FREQ_MHZ=$(do_sub_file_frequency_mhz "$FILE_LOC")
 				do_enter_playback_mode
 				if [ $abort_action -eq 0 ]; then
 					REPEAT_COUNT=1
@@ -602,9 +616,13 @@ do_freq_setup
 						do_enter_repeat_count
 					fi
 					if [ $abort_action -eq 0 ]; then
-						whiptail --title "Sub-GHz replay" --msgbox "The frequency embedded in the .sub file will be used, not the frequency set above.\n\nOnly transmit captures you own or are authorized to send." 10 78
+						if [ -n "$SUB_FREQ_MHZ" ]; then
+							whiptail --title "Sub-GHz replay" --msgbox "This capture will transmit on ${SUB_FREQ_MHZ} MHz - the frequency stored in the file itself, not the ${OUTPUT_FREQ} MHz set above.\n\nOnly transmit captures you own or are authorized to send." 11 78
+						else
+							whiptail --title "Sub-GHz replay" --msgbox "Couldn't find a Frequency: field in this file, so the actual transmit frequency depends entirely on testsub.sh/pisub - not the ${OUTPUT_FREQ} MHz set above.\n\nOnly transmit captures you own or are authorized to send." 11 78
+						fi
 						testsub.sh "$FILE_LOC" "$PLAYBACK_MODE" "$REPEAT_COUNT" >/dev/null 2>/dev/null &
-						do_status
+						do_status "${SUB_FREQ_MHZ:-$OUTPUT_FREQ}"
 					fi
 				fi
 			fi
