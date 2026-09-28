@@ -1,9 +1,15 @@
 #!/bin/bash
 
-# ----------------------------------------------------------
-# mostly-a-SDR theme: neon green / neon pink on black
-# (same palette, banner and backtitle as start.sh)
-# ----------------------------------------------------------
+# ==========================================================================
+#  mostly-a-SDR :: neon green / neon pink on black
+#  --------------------------------------------------------------------------
+#  Boot sequence, glitch banner, live backtitle, TX alert dialogs, outro.
+#  MAS_QUICK=1 ./script.sh   -> skip boot log / animation / key-wait
+#  Everything cosmetic is terminal-only and degrades to plain output when not
+#  attached to a UTF-8 tty, so piped / logged runs stay clean.
+# ==========================================================================
+
+# newt palette: "magenta" stands in for neon pink, "green" for neon green.
 export NEWT_COLORS='
 root=green,black
 border=magenta,black
@@ -28,31 +34,157 @@ disabledentry=magenta,black
 compactbutton=black,green
 '
 
-# Every whiptail dialog below gets the same "mostly-a-SDR" backtitle as start.sh.
-whiptail()
+# Inverted "red alert" palette, used only for the live-TX dialog:
+# pink window, reverse-video pink title bar, green frame.
+MAS_TX_COLORS='
+root=green,black
+border=green,black
+window=magenta,black
+shadow=black,black
+title=black,magenta
+button=black,green
+actbutton=black,magenta
+textbox=magenta,black
+acttextbox=black,magenta
+label=magenta,black
+helpline=magenta,black
+roottext=magenta,black
+'
+
+MAS_TX_STATE="STANDBY"      # STANDBY | LIVE | REC  (shown in the backtitle)
+
+# --- raw ANSI 256-colour building blocks -----------------------------------
+MAS_PINK=$'\033[0;38;5;198m'
+MAS_GREEN=$'\033[0;38;5;84m'
+MAS_G35=$'\033[0;38;5;35m'
+MAS_DIM=$'\033[0;38;5;240m'
+MAS_DARK=$'\033[0;38;5;236m'
+MAS_OKC=$'\033[1;38;5;47m'
+MAS_RST=$'\033[0m'
+MAS_GRAD=(157 121 84 47 41 35 157 121 84 47 41 35)      # per logo row
+MAS_LVL=(35 35 41 41 47 47 84 84 121 198 198 198)       # per equaliser level
+MAS_TARGET=(1 2 2 3 4 6 9 12 8 5 3 2 2 1)               # "locked signal" shape
+MAS_H=(2 2 2 2 2 2 2 2 2 2 2 2 2 2)
+MAS_SP=$'        '
+MAS_OUT=""
+MAS_BUF=""
+MAS_ANIM=1
+MAS_BAD=()
+MAS_TOTAL=0
+
+# ---------------------------------------------------------------------------
+# Live backtitle: state, UTC clock (FT8 slots care), site. Re-evaluated on
+# every dialog, so the clock and TX state are always current.
+# ---------------------------------------------------------------------------
+mas_backtitle()
 {
-	command whiptail --backtitle "mostly-a-SDR - Made for mostlyawesome.de" "$@"
+	local clk state
+	clk=$(date -u +%H:%M:%S)
+	case "$MAS_TX_STATE" in
+		LIVE) state="● TX LIVE" ;;
+		REC)  state="● REC" ;;
+		*)    state="○ standby" ;;
+	esac
+	printf '░▒▓ mostly-a-SDR ▓▒░ %s ░ %s UTC ░ Made for mostlyawesome.de' "$state" "$clk"
 }
 
-# Green-gradient block logo inside a neon-pink "terminal" frame (ANSI 256-color).
-# Only emitted to an interactive terminal so piped / logged output stays clean.
-show_banner()
+whiptail()
 {
-	[ -t 1 ] || return 0
+	command whiptail --backtitle "$(mas_backtitle)" "$@"
+}
 
-	local pink=$'\033[38;5;198m'
-	local dim=$'\033[38;5;240m'
-	local reset=$'\033[0m'
-	local grad=(157 121 84 47 41 35 157 121 84 47 41 35)
-	local line i=0
+# ---------------------------------------------------------------------------
+# small helpers (results go through globals - no subshell forks in hot loops)
+# ---------------------------------------------------------------------------
+mas_utf8()
+{
+	case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+		*[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) return 0 ;;
+	esac
+	return 1
+}
 
-	printf '%s' "$pink"
-	printf '┌─[ root@mostly-a-sdr:~# ./rtl-sdr --transponder ]───────────────────░▒▓█▓▒░─┐\n'
-	printf '%s│%s\n' "$pink" "$reset"
-	while IFS= read -r line; do
-		printf '%s│ %s\033[1;38;5;%sm%s%s\n' "$pink" "$reset" "${grad[i]}" "$line" "$reset"
-		i=$((i + 1))
-	done <<'BANNER'
+mas_rep()       # mas_rep <string> <count>  -> MAS_OUT
+{
+	local s
+	printf -v s '%*s' "$2" ''
+	MAS_OUT=${s// /$1}
+}
+
+mas_glitch()    # mas_glitch <string> <hits>  -> MAS_OUT (same length)
+{
+	local s=$1 n=$2 len=${#1} i p g
+	local gl='░▒▓█▌▐▀▄╳#%@$&0123456789ABCDEF'
+	for ((i = 0; i < n && len > 0; i++)); do
+		p=$((RANDOM % len))
+		g=${gl:RANDOM % ${#gl}:1}
+		s=${s:0:p}${g}${s:p+1}
+	done
+	MAS_OUT=$s
+}
+
+mas_strip()     # mas_strip <width> <max-height 0-7> <settled 0|1>  -> MAS_OUT
+{
+	local w=$1 maxh=$2 last=$3 i h=3 col cur="" s=""
+	local blocks='▁▂▃▄▅▆▇█'
+	local mid=$((w / 2))
+	for ((i = 0; i < w; i++)); do
+		if (( last )); then
+			h=$((RANDOM % 2))
+			(( i == mid - 2 || i == mid + 2 )) && h=2
+			(( i == mid - 1 || i == mid + 1 )) && h=4
+			(( i == mid )) && h=7
+		else
+			h=$((h + RANDOM % 3 - 1))
+			(( h < 0 )) && h=0
+			(( h > maxh )) && h=$maxh
+		fi
+		if   (( h >= 6 )); then col=$MAS_PINK
+		elif (( h >= 3 )); then col=$MAS_GREEN
+		else                    col=$MAS_G35
+		fi
+		[ "$col" != "$cur" ] && { s+=$col; cur=$col; }
+		s+=${blocks:h:1}
+	done
+	MAS_OUT=$s
+}
+
+mas_hexrow()    # mas_hexrow <locked-bytes> <settled 0|1>  -> MAS_OUT (74 cols)
+{
+	local n=$1 last=$2 i b addr s
+	if (( last )); then addr=C0FFEE00; else printf -v addr '%04X%04X' "$RANDOM" "$RANDOM"; fi
+	s="${MAS_DIM}0x${addr}  "
+	for ((i = 0; i < 18; i++)); do
+		if (( i < n )); then
+			s+="${MAS_GREEN}${MAS_HEX[i]} "
+		else
+			printf -v b '%02X' $((RANDOM % 256))
+			s+="${MAS_DIM}${b} "
+		fi
+	done
+	MAS_OUT="${s}        "
+}
+
+mas_row()       # append a boxed row; $1 must be exactly 74 visible columns
+{
+	MAS_BUF+="${MAS_PINK}│ ${1}${MAS_RST}${MAS_PINK} │${MAS_RST}"$'\n'
+}
+
+mas_textrow()   # mas_textrow <text> <colour>
+{
+	local t=${1:0:70}
+	mas_rep ' ' $((70 - ${#t}))
+	MAS_BUF+="${MAS_PINK}│ ${MAS_DIM}[${MAS_PINK}+${MAS_DIM}]${2} ${t}${MAS_OUT}${MAS_PINK} │${MAS_RST}"$'\n'
+}
+
+# ---------------------------------------------------------------------------
+# one-time banner data: logo rows padded to 58 cols, two-tone neon colouring
+# (solid blocks = green gradient, shadow strokes = pink), frame rules, sys info
+# ---------------------------------------------------------------------------
+mas_init()
+{
+	local i j c out cur want row head t
+	mapfile -t MAS_LOGO <<'MAS_LOGO_EOF'
 ███╗   ███╗ ██████╗ ███████╗████████╗██╗  ██╗   ██╗
 ████╗ ████║██╔═══██╗██╔════╝╚══██╔══╝██║  ╚██╗ ██╔╝
 ██╔████╔██║██║   ██║███████╗   ██║   ██║   ╚████╔╝█████╗
@@ -65,11 +197,225 @@ show_banner()
       ██╔══██║╚════╝╚════██║██║  ██║██╔══██╗
       ██║  ██║      ███████║██████╔╝██║  ██║
       ╚═╝  ╚═╝      ╚══════╝╚═════╝ ╚═╝  ╚═╝
-BANNER
-	printf '%s│%s\n' "$pink" "$reset"
-	printf '%s│ %s[%s+%s]%s rtl-sdr bridge :: raspberry pi :: record / replay / transpond / decode\n' "$pink" "$dim" "$pink" "$dim" "$reset"
-	printf '%s│ %s[%s+%s]%s tx armed. know your local laws. transmit responsibly.\n' "$pink" "$dim" "$pink" "$dim" "$reset"
-	printf '%s└─░▒▓█▓▒░────────────────────────────────────────────────────────────░▒▓█▓▒░─┘%s\n' "$pink" "$reset"
+MAS_LOGO_EOF
+
+	MAS_CLOGO=()
+	for ((i = 0; i < 12; i++)); do
+		row=${MAS_LOGO[i]}
+		while (( ${#row} < 58 )); do row+=' '; done
+		MAS_LOGO[i]=$row
+		out=""; cur=""
+		for ((j = 0; j < ${#row}; j++)); do
+			c=${row:j:1}
+			case "$c" in
+				' ') want="" ;;
+				█)   want=$'\033[1;38;5;'"${MAS_GRAD[i]}"m ;;
+				*)   want=$MAS_PINK ;;
+			esac
+			if [ -n "$want" ] && [ "$want" != "$cur" ]; then out+=$want; cur=$want; fi
+			out+=$c
+		done
+		MAS_CLOGO[i]=$out
+	done
+
+	MAS_LC=()
+	for ((i = 0; i < 12; i++)); do MAS_LC[i]=$'\033[0;38;5;'"${MAS_LVL[i]}"m; done
+
+	MAS_NOISE=""
+	for ((i = 0; i < 180; i++)); do c='░▒▓'; MAS_NOISE+=${c:RANDOM % 3:1}; done
+
+	MAS_HEX=()
+	t="MOSTLY-A-SDR ARMED"
+	for ((i = 0; i < 18; i++)); do printf -v c '%02X' "'${t:i:1}"; MAS_HEX[i]=$c; done
+
+	head="[ root@mostly-a-sdr:~# ${MAS_CMD:-./transmit} ]"
+	mas_rep '─' $((67 - ${#head}));  MAS_TOP="┌─${head}${MAS_OUT}░▒▓█▓▒░─┐"
+	mas_rep '─' 60;                  MAS_DIV="├─[ sys ]${MAS_OUT}░▒▓█▓▒░─┤"
+	                                 MAS_BOT="└─░▒▓█▓▒░${MAS_OUT}░▒▓█▓▒░─┘"
+
+	MAS_HOST=$(hostname 2>/dev/null); [ -n "$MAS_HOST" ] || MAS_HOST=unknown
+	MAS_MODEL=$(tr -d '\0' 2>/dev/null </proc/device-tree/model)
+	[ -n "$MAS_MODEL" ] || MAS_MODEL=$(uname -m 2>/dev/null)
+	MAS_SYS="node ${MAS_HOST} :: ${MAS_MODEL}"
+	t=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
+	if [[ "$t" =~ ^[0-9]+$ ]]; then
+		MAS_SYS+=" :: $((t / 1000)).$((t % 1000 / 100))C"
+	fi
+}
+
+# ---------------------------------------------------------------------------
+# one banner frame. f = 0..F-1; the last frame is the settled, clean logo.
+#   phase 1: rows scan in out of static      phase 2: glitch decays
+#   equaliser + top strip + hex dump "lock" onto the signal as f -> F-1
+# ---------------------------------------------------------------------------
+mas_frame()
+{
+	local f=$1 F=$2 last=0 i j reveal gp maxh row body panel lvl off src lock
+	(( f == F - 1 )) && last=1
+	reveal=$((f * 2)); gp=$((60 - f * 3)); maxh=$((7 - f * 5 / (F - 1)))
+	(( last )) && { reveal=99; gp=0; }
+	(( gp < 0 )) && gp=0
+	(( maxh < 2 )) && maxh=2
+	MAS_BUF=""
+
+	MAS_BUF+="${MAS_PINK}${MAS_TOP}${MAS_RST}"$'\n'
+	mas_strip 74 "$maxh" "$last"; mas_row "$MAS_OUT"
+
+	for ((j = 0; j < 14; j++)); do
+		if (( last )); then
+			MAS_H[j]=${MAS_TARGET[j]}
+		else
+			MAS_H[j]=$((MAS_H[j] + RANDOM % 7 - 3))
+			(( f > 9 )) && MAS_H[j]=$(( (MAS_H[j] + MAS_TARGET[j]) / 2 + RANDOM % 3 - 1 ))
+			(( MAS_H[j] < 0 ))  && MAS_H[j]=0
+			(( MAS_H[j] > 12 )) && MAS_H[j]=12
+		fi
+	done
+
+	for ((i = 0; i < 12; i++)); do
+		if (( i >= reveal )); then
+			body="${MAS_DARK}${MAS_NOISE:RANDOM % 120:58}"
+		elif (( i == reveal - 1 && ! last && f < 7 )); then
+			body="${MAS_PINK}${MAS_LOGO[i]}"
+		elif (( gp > 0 && RANDOM % 100 < gp )); then
+			src=$i; (( RANDOM % 3 == 0 )) && src=$((RANDOM % 12))
+			off=$((RANDOM % 5))
+			row="${MAS_SP:0:off}${MAS_LOGO[src]:0:58-off}"
+			mas_glitch "$row" $((1 + RANDOM % 4))
+			if (( RANDOM % 2 )); then body="${MAS_PINK}${MAS_OUT}"
+			else body=$'\033[1;38;5;'"${MAS_GRAD[i]}m${MAS_OUT}"; fi
+		else
+			body=${MAS_CLOGO[i]}
+		fi
+		lvl=$((11 - i)); panel=""
+		for ((j = 0; j < 14; j++)); do
+			if (( MAS_H[j] > lvl )); then panel+="${MAS_LC[lvl]}█"
+			else panel+="${MAS_DARK}·"; fi
+		done
+		mas_row "${body}${MAS_RST}  ${panel}"
+	done
+
+	lock=$((f * 18 / (F - 1))); (( last )) && lock=18
+	mas_hexrow "$lock" "$last"; mas_row "$MAS_OUT"
+
+	MAS_BUF+="${MAS_PINK}${MAS_DIV}${MAS_RST}"$'\n'
+	mas_textrow "$MAS_SYS" "$MAS_GREEN"
+	mas_textrow "${MAS_TAG:-rf toolkit :: raspberry pi}" "$MAS_GREEN"
+	if (( ${#MAS_BAD[@]} )); then
+		mas_textrow "pre-flight :: MISSING ${MAS_BAD[*]}" "$MAS_PINK"
+	else
+		mas_textrow "pre-flight :: ${MAS_TOTAL}/${MAS_TOTAL} checks passed :: all systems nominal" "$MAS_GREEN"
+	fi
+	mas_textrow "tx armed. know your local laws. transmit responsibly." "$MAS_PINK"
+	MAS_BUF+="${MAS_PINK}${MAS_BOT}${MAS_RST}"$'\n'
+}
+
+# ---------------------------------------------------------------------------
+# pre-flight: real checks, cinematic delivery. Never blocks - missing pieces
+# are flagged so you know before a transmit silently does nothing.
+#   mas_check <label> <shell snippet whose stdout is the detail, exit 0 = ok>
+# ---------------------------------------------------------------------------
+mas_check()
+{
+	local label=$1 detail
+	MAS_TOTAL=$((MAS_TOTAL + 1))
+	(( MAS_SHOWBOOT )) && printf '  %s[ .. ]%s %-16s' "$MAS_DIM" "$MAS_RST" "$label"
+	(( MAS_SHOWBOOT && MAS_ANIM )) && sleep 0.05
+	if detail=$(eval "$2" 2>/dev/null); then
+		detail=${detail%%$'\n'*}
+		(( MAS_SHOWBOOT )) && printf '\r  %s[ OK ]%s %-16s %s%s%s\n' "$MAS_OKC" "$MAS_RST" "$label" "$MAS_DIM" "${detail:0:44}" "$MAS_RST"
+	else
+		MAS_BAD+=("$label")
+		(( MAS_SHOWBOOT )) && printf '\r  %s[FAIL]%s %-16s %snot found%s\n' "$MAS_PINK" "$MAS_RST" "$label" "$MAS_DIM" "$MAS_RST"
+	fi
+	return 0
+}
+
+# Blinking "press any key" hold - whiptail grabs the screen the instant it
+# starts, so without this the banner would never actually be seen.
+mas_prompt()
+{
+	local i k
+	for ((i = 0; i < 14; i++)); do
+		if (( i % 2 )); then printf '\r\033[K %s▸ press any key to jack in%s' "$MAS_DIM" "$MAS_RST"
+		else                 printf '\r\033[K %s▸ press any key to jack in%s █' "$MAS_PINK" "$MAS_RST"; fi
+		if read -rsn1 -t 0.35 k; then break; fi
+	done
+	printf '\r\033[K'
+}
+
+show_banner()
+{
+	[ -t 1 ] || return 0
+	if ! mas_utf8; then
+		printf 'mostly-a-SDR :: %s\n' "${MAS_TAG:-rf toolkit}"
+		printf 'tx armed. know your local laws. transmit responsibly.\n'
+		return 0
+	fi
+
+	local F=20 f rows quick=0
+	[ "${MAS_QUICK:-0}" = 1 ] && quick=1
+	rows=$(tput lines 2>/dev/null); rows=${rows:-24}
+	MAS_ANIM=1; (( quick || rows < 24 )) && MAS_ANIM=0
+	MAS_SHOWBOOT=$MAS_ANIM
+	MAS_BAD=(); MAS_TOTAL=0
+
+	trap 'printf "\033[?25h\033[0m\n"; exit 130' INT
+	(( MAS_ANIM )) && printf '\033[2J\033[H'
+	(( MAS_SHOWBOOT )) && {
+		printf '%s  mostly-a-SDR boot :: %s%s\n\n' "$MAS_PINK" "$(date '+%F %T')" "$MAS_RST"
+	}
+	if declare -F mas_preflight >/dev/null; then mas_preflight; fi
+	mas_init
+
+	if (( MAS_ANIM )); then
+		sleep 0.5
+		printf '\033[2J\033[H\033[?25l'
+		for ((f = 0; f < F; f++)); do
+			mas_frame "$f" "$F"
+			(( f > 0 )) && printf '\033[21A'
+			printf '%s' "$MAS_BUF"
+			sleep 0.045
+		done
+		printf '\033[?25h'
+		[ -t 0 ] && mas_prompt
+	else
+		mas_frame 1 2
+		printf '%s' "$MAS_BUF"
+	fi
+	trap - INT
+}
+
+# Short glitch-out when the session ends.
+mas_outro()
+{
+	[ -t 1 ] || return 0
+	local msg="[-] carrier dropped :: session closed :: 73 de mostly-a-SDR" n
+	if ! mas_utf8 || [ "${MAS_QUICK:-0}" = 1 ]; then
+		printf '%s\n' "$msg"; return 0
+	fi
+	for n in 18 12 6 3; do
+		mas_glitch "$msg" "$n"
+		printf '\r\033[K%s%s%s' "$MAS_PINK" "$MAS_OUT" "$MAS_RST"
+		sleep 0.07
+	done
+	printf '\r\033[K%s%s%s\n' "$MAS_PINK" "$msg" "$MAS_RST"
+}
+
+MAS_CMD='./rtl-sdr --transponder'
+MAS_TAG='rtl-sdr bridge :: raspberry pi :: record / replay / transpond'
+
+mas_preflight()
+{
+	mas_check "whiptail"     'type -P whiptail'
+	mas_check "sudo"         'type -P sudo'
+	mas_check "rtl_sdr"      'type -P rtl_sdr'
+	mas_check "rtl_fm"       'type -P rtl_fm'
+	mas_check "sendiq"       'type -P sendiq'
+	mas_check "transponder"  '[ -f transponder.sh ] && echo "$PWD/transponder.sh"'
+	mas_check "fm2ssb"       '[ -f fm2ssb.sh ] && echo "$PWD/fm2ssb.sh"'
+	mas_check "rtl-sdr usb"  'if type -P lsusb >/dev/null; then lsusb | grep -i -m1 -E "0bda:28|rtl"; else echo "lsusb n/a"; fi'
+	mas_check "/dev/mem"     '[ -c /dev/mem ] && echo /dev/mem'
 }
 
 status="0"
@@ -78,26 +424,18 @@ INPUT_GAIN=35
 OUTPUT_FREQ=434.0
 LAST_ITEM="0 Record"
 
-# --- rtl_433 decoder / signal library -------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SDRTOOL="$SCRIPT_DIR/sdrtool.py"
-SIGNAL_DIR="$SCRIPT_DIR/signals"          # captured I/Q (.cu8), notes, packet models
-SUB_DIR="$SIGNAL_DIR/sub"                 # exported Flipper Zero .sub files
-DECODE_FREQ=433.92
-TOOL_OUT=""
-
 do_freq_setup()
 {
 
-if FREQ=$(whiptail --inputbox "Choose input Frequency (in MHz). Default is 434 MHz" 8 78 $INPUT_RTLSDR --title "RTL-SDR receive frequency" 3>&1 1>&2 2>&3); then
+if FREQ=$(whiptail --inputbox "Choose input Frequency (in MHz). Default is 434 MHz" 8 78 "$INPUT_RTLSDR" --title "░▒▓ RTL-SDR receive frequency ▓▒░" 3>&1 1>&2 2>&3); then
     INPUT_RTLSDR=$FREQ
 fi
 
-if GAIN=$(whiptail --inputbox "Choose input Gain (0(AGC) or 1-45)" 8 78 $INPUT_GAIN --title "RTL-SDR receive gain" 3>&1 1>&2 2>&3); then
+if GAIN=$(whiptail --inputbox "Choose input Gain (0(AGC) or 1-45)" 8 78 "$INPUT_GAIN" --title "░▒▓ RTL-SDR receive gain ▓▒░" 3>&1 1>&2 2>&3); then
     INPUT_GAIN=$GAIN
 fi
 
-if FREQ=$(whiptail --inputbox "Choose output Frequency (in MHz). Default is 434 MHz" 8 78 $OUTPUT_FREQ --title "mostly-a-SDR transmit frequency" 3>&1 1>&2 2>&3); then
+if FREQ=$(whiptail --inputbox "Choose output Frequency (in MHz). Default is 434 MHz" 8 78 "$OUTPUT_FREQ" --title "░▒▓ mostly-a-SDR transmit frequency ▓▒░" 3>&1 1>&2 2>&3); then
     OUTPUT_FREQ=$FREQ
 fi
 
@@ -108,233 +446,18 @@ do_stop()
 	sudo killall rtl_sdr 2>/dev/null
 	sudo killall sendiq 2>/dev/null
 	sudo killall rtl_fm 2>/dev/null
-	sudo killall rtl_433 2>/dev/null
 }
 do_status()
 {
-	 LAST_ITEM="$menuchoice"
-	whiptail --title "Transmit ""$LAST_ITEM"" on ""$OUTPUT_FREQ"" MHz" --msgbox "Transmitting" 8 78
+	local what="TRANSMITTING" tag="TX LIVE"
+	LAST_ITEM="$menuchoice"
+	MAS_TX_STATE=LIVE
+	case "$LAST_ITEM" in
+		0\ *) MAS_TX_STATE=REC; what="RECORDING"; tag="REC" ;;
+	esac
+	NEWT_COLORS="$MAS_TX_COLORS" whiptail --title "░▒▓ $tag :: $LAST_ITEM @ $OUTPUT_FREQ MHz ▓▒░" --ok-button "STOP" --msgbox "● $what ●\n\n  mode : $LAST_ITEM\n  in   : $INPUT_RTLSDR MHz (gain $INPUT_GAIN)\n  out  : $OUTPUT_FREQ MHz\n\nPress STOP to kill the running process." 14 78
+	MAS_TX_STATE=STANDBY
 	do_stop
-}
-
-# ----------------------------------------------------------
-# helpers
-# ----------------------------------------------------------
-need_tool()
-{
-	command -v "$1" >/dev/null 2>&1 && return 0
-	whiptail --title "Missing: $1" --msgbox "$2" 12 78
-	return 1
-}
-
-# Run sdrtool.py; output lands in $TOOL_OUT, errors are shown in a message box.
-tool_try()
-{
-	if ! TOOL_OUT=$(python3 "$SDRTOOL" "$@" 2>&1); then
-		whiptail --title "sdrtool" --msgbox "$TOOL_OUT" 14 78
-		return 1
-	fi
-	return 0
-}
-
-# Cached one-line rtl_433 summary of a capture ("Nexus-TH id=90 ch=1 21.3C 45%").
-signal_summary()
-{
-	local f="$1" c="${1%.cu8}.info" s
-	if [ ! -s "$c" ]; then
-		s=$(python3 "$SDRTOOL" info "$f" 2>/dev/null)
-		case "$s" in
-			"("*) printf '%s' "$s"; return;;   # don't cache "not decoded" / "not installed"
-		esac
-		printf '%s\n' "$s" > "$c"
-	fi
-	cat "$c"
-}
-
-# Replay an I/Q capture (.cu8 = u8 I/Q, 250 kS/s) with sendiq, like "1 Play".
-tx_iq()
-{
-	local f="$1" mhz loop=()
-	mhz=$(python3 "$SDRTOOL" freq "$f" 2>/dev/null)
-	mhz=$(whiptail --inputbox "Transmit frequency (in MHz)" 8 78 "${mhz:-$OUTPUT_FREQ}" --title "Replay $(basename "$f")" 3>&1 1>&2 2>&3) || return
-	if whiptail --title "Repeat?" --yesno "Repeat the signal until you stop it?" 8 60; then
-		loop=(-l)
-	fi
-	do_stop
-	sudo sendiq -s 250000 -f "$mhz"e6 -t u8 "${loop[@]}" -i "$f" >/dev/null 2>/dev/null &
-	whiptail --title "Transmit $(basename "$f") on $mhz MHz" --msgbox "Transmitting - press OK to stop" 8 78
-	do_stop
-}
-
-# ----------------------------------------------------------
-# 5 Decode: rtl_433 in the foreground (Ctrl+C to stop)
-# ----------------------------------------------------------
-do_decode()
-{
-	need_tool rtl_433 "rtl_433 is not installed.\n\nInstall it with:\n  sudo apt install rtl-433\n\nor build it from https://github.com/merbanan/rtl_433" || return
-
-	local mhz save before after saveopt=()
-	mhz=$(whiptail --inputbox "Frequency to decode (in MHz).\n433.92 is the usual ISM band for weather stations, remotes, doorbells ...\n(868.3 / 915 also work for many devices)" 11 78 "$DECODE_FREQ" --title "rtl_433 decoder" 3>&1 1>&2 2>&3) || return
-	DECODE_FREQ="$mhz"
-
-	save=$(whiptail --title "Save received signals" --radiolist "Save received bursts as I/Q files? Saved signals can be exported as Flipper .sub, edited and replayed." 14 78 3 \
-		"known" "Only signals rtl_433 could decode" ON \
-		"all" "Every burst (unknown devices too, can get noisy)" OFF \
-		"none" "Don't save, just decode" OFF 3>&1 1>&2 2>&3) || return
-	[ "$save" != "none" ] && saveopt=(-S "$save")
-
-	mkdir -p "$SIGNAL_DIR"
-	before=$(ls "$SIGNAL_DIR"/*.cu8 2>/dev/null | wc -l)
-	do_stop
-	clear
-	printf '\033[38;5;198m[+]\033[0m rtl_433 listening on \033[1;38;5;47m%s MHz\033[0m (gain %s) - press \033[1;38;5;198mCtrl+C\033[0m to stop\n\n' "$DECODE_FREQ" "$INPUT_GAIN"
-
-	# Ctrl+C must only stop rtl_433, not this menu.
-	trap ':' INT
-	( cd "$SIGNAL_DIR" && exec stdbuf -oL rtl_433 -f "${DECODE_FREQ}M" -s 250k -g "$INPUT_GAIN" -M level -C si "${saveopt[@]}" -F kv 2>&1 ) | tee "$SIGNAL_DIR/live.log"
-	trap - INT
-	do_stop
-
-	after=$(ls "$SIGNAL_DIR"/*.cu8 2>/dev/null | wc -l)
-	whiptail --title "Decoder stopped" --msgbox "Saved $((after - before)) new signal(s) in:\n$SIGNAL_DIR\n\nOpen '6 Signals' to export them as .sub, edit values or replay." 12 78
-}
-
-# ----------------------------------------------------------
-# 6 Signals: library of captured signals
-# ----------------------------------------------------------
-do_signals()
-{
-	need_tool python3 "python3 is required for the signal tools.\n\n  sudo apt install python3" || return
-	local items f sel
-	while true; do
-		items=()
-		for f in "$SIGNAL_DIR"/*.cu8; do
-			[ -e "$f" ] || continue
-			items+=("$(basename "$f")" "$(signal_summary "$f")")
-		done
-		if [ ${#items[@]} -eq 0 ]; then
-			whiptail --title "Signals" --msgbox "No captured signals yet.\n\nUse '5 Decode' and let rtl_433 save the signals it receives." 10 78
-			return
-		fi
-		sel=$(whiptail --title "Captured signals" --menu "Choose a signal ($SIGNAL_DIR)" 22 96 14 "${items[@]}" 3>&1 1>&2 2>&3) || return
-		signal_actions "$SIGNAL_DIR/$sel"
-	done
-}
-
-signal_actions()
-{
-	local f="$1" base="${1%.cu8}" act mode out tmp
-	while true; do
-		[ -e "$f" ] || return
-		act=$(whiptail --title "$(basename "$f")" --menu "$(signal_summary "$f")" 18 82 6 \
-			"1 Details" "Full rtl_433 decode of this signal" \
-			"2 Export .sub" "Save as Flipper Zero SubGHz RAW file" \
-			"3 Edit values" "Change temperature, humidity, id ... and re-encode" \
-			"4 Transmit" "Replay this capture unchanged" \
-			"5 Delete" "Remove this signal" \
-			3>&1 1>&2 2>&3) || return
-
-		case "$act" in
-			1\ *)
-				tmp=$(mktemp)
-				if command -v rtl_433 >/dev/null 2>&1; then
-					rtl_433 -r "$f" -s 250k -F kv 2>/dev/null > "$tmp"
-				fi
-				[ -s "$tmp" ] || echo "rtl_433 could not decode this signal (or is not installed)." > "$tmp"
-				whiptail --title "Details" --scrolltext --textbox "$tmp" 22 82
-				rm -f "$tmp";;
-			2\ *)
-				mode=$(whiptail --title "Modulation" --radiolist "Modulation of the signal (sets the Flipper preset)" 11 78 2 \
-					"ook" "OOK / ASK - most 433 MHz weather stations" ON \
-					"fsk" "2-FSK" OFF 3>&1 1>&2 2>&3) || continue
-				out="$SUB_DIR/$(basename "$base").sub"
-				tool_try sub "$f" "$out" --mode "$mode" && whiptail --title "Export .sub" --msgbox "$TOOL_OUT" 14 78;;
-			3\ *)
-				edit_signal "$f";;
-			4\ *)
-				tx_iq "$f";;
-			5\ *)
-				if whiptail --title "Delete" --yesno "Delete $(basename "$f") ?" 8 60; then
-					rm -f "$f" "$base.info" "$base.pkt.json"
-					return
-				fi;;
-		esac
-	done
-}
-
-# ----------------------------------------------------------
-# Value editor: slice the capture into bits, change fields, re-encode
-# ----------------------------------------------------------
-edit_signal()
-{
-	local f="$1" base="${1%.cu8}"
-	local pkt="${1%.cu8}.pkt.json" edited="${1%.cu8}_edited.cu8"
-	local sub="$SUB_DIR/$(basename "${1%.cu8}")_edited.sub"
-	local items name val sel new crc hex tmp
-	declare -A cur
-
-	if [ ! -s "$pkt" ]; then
-		tool_try analyze "$f" "$pkt" || { rm -f "$pkt"; return; }
-		whiptail --title "Edit values" --msgbox "$TOOL_OUT" 14 78
-	fi
-
-	while true; do
-		items=()
-		cur=()
-		while IFS='|' read -r name val; do
-			items+=("$name" "$val")
-			cur[$name]="$val"
-		done < <(python3 "$SDRTOOL" fields "$pkt" 2>/dev/null)
-		crc=$(python3 "$SDRTOOL" checksum "$pkt" 2>/dev/null)
-		hex=$(python3 "$SDRTOOL" hex "$pkt" 2>/dev/null)
-		items+=("#hex" "Raw data bits: $hex" \
-			"#field" "Define / add a custom field" \
-			"#crc" "Checksum rule: $crc" \
-			"#keeloq" "Decode as KeeLoq (rolling-code remote)" \
-			"#render" "Render edited signal (.cu8 + .sub) and check it with rtl_433" \
-			"#send" "Transmit the edited signal")
-
-		sel=$(whiptail --title "Edit $(basename "$f")" --menu "Pick a value to change. All repeats of the packet get the new data." 22 96 12 "${items[@]}" 3>&1 1>&2 2>&3) || return
-
-		case "$sel" in
-			"#hex")
-				new=$(whiptail --inputbox "Raw data bits as hex (same number of digits)" 9 78 "$hex" --title "Raw data" 3>&1 1>&2 2>&3) || continue
-				tool_try sethex "$pkt" "$new";;
-			"#field")
-				new=$(whiptail --inputbox "name offset length signed(0/1) divisor bias\n\nvalue = (raw - bias) / divisor. Example (Nexus temperature):\ntemperature_C 12 12 1 10 0" 13 78 "" --title "Custom field" 3>&1 1>&2 2>&3) || continue
-				tool_try addfield "$pkt" "$new";;
-			"#crc")
-				new=$(whiptail --inputbox "KIND FIRST_BYTE END_BYTE TARGET_BYTE\nKIND: sum8 | xor8 | crc8:POLY:INIT (hex), e.g.  crc8:31:00 0 4 4\nType none to disable." 11 78 "$crc" --title "Checksum" 3>&1 1>&2 2>&3) || continue
-				tool_try checksum "$pkt" "$new";;
-			"#keeloq")
-				new=$(whiptail --inputbox "64-bit manufacturer key in hex (leave empty to just show\nthe plaintext serial + encrypted hop code, no decrypt)." 10 78 "" --title "KeeLoq decode" 3>&1 1>&2 2>&3) || continue
-				tmp=$(mktemp)
-				if [ -n "$new" ]; then
-					python3 "$SDRTOOL" keeloq "$pkt" --key "$new" > "$tmp" 2>&1
-				else
-					python3 "$SDRTOOL" keeloq "$pkt" > "$tmp" 2>&1
-				fi
-				whiptail --title "KeeLoq" --scrolltext --textbox "$tmp" 22 82
-				rm -f "$tmp";;
-			"#render")
-				tool_try render "$pkt" "$edited" --sub "$sub" || continue
-				tmp=$(mktemp)
-				{
-					echo "$TOOL_OUT"
-					echo
-					echo "--- rtl_433 decode of the edited signal ---"
-					rtl_433 -r "$edited" -s 250k -F kv 2>/dev/null || echo "(rtl_433 not available)"
-				} > "$tmp"
-				whiptail --title "Edited signal" --scrolltext --textbox "$tmp" 22 82
-				rm -f "$tmp";;
-			"#send")
-				tool_try render "$pkt" "$edited" --sub "$sub" || continue
-				tx_iq "$edited";;
-			*)
-				new=$(whiptail --inputbox "New value for $sel" 8 78 "${cur[$sel]}" --title "Edit $sel" 3>&1 1>&2 2>&3) || continue
-				tool_try set "$pkt" "$sel" "$new";;
-		esac
-	done
 }
 
 show_banner
@@ -343,14 +466,12 @@ do_freq_setup
  while [ "$status" -eq 0 ]
     do
 
- menuchoice=$(whiptail --default-item "$LAST_ITEM" --title "mostly-a-SDR with RTL-SDR" --menu "Record, replay, transpond, decode. Choose your test:" 20 82 12 \
+ menuchoice=$(whiptail --default-item "$LAST_ITEM" --ok-button "ENGAGE" --cancel-button "EXIT" --title "░▒▓ mostly-a-SDR :: RTL-SDR :: $INPUT_RTLSDR → $OUTPUT_FREQ MHz ▓▒░" --menu "root@mostly-a-sdr:~# ./rtl-sdr --menu   (record, replay, transpond)" 20 82 12 \
 	"0 Record" "Record spectrum on $INPUT_RTLSDR MHz" \
 	"1 Play" "Replay spectrum" \
 	"2 Transponder" "Transmit $INPUT_RTLSDR MHz to ""$OUTPUT_FREQ"" MHz" \
 	"3 Fm->SSB" "Transcode FM $INPUT_RTLSDR MHz to ""$OUTPUT_FREQ"" MHz" \
 	"4 Set frequency" "Modify frequency (actual $INPUT_RTLSDR MHz)" \
-	"5 Decode" "rtl_433: weather stations & 433 MHz devices" \
-	"6 Signals" "Saved signals: export .sub, edit values, replay" \
 	3>&2 2>&1 1>&3)
 
         case "$menuchoice" in
@@ -364,12 +485,10 @@ do_freq_setup
 		do_status;;
 		4\ *)
 		do_freq_setup;;
-		5\ *) LAST_ITEM="$menuchoice"
-		do_decode;;
-		6\ *) LAST_ITEM="$menuchoice"
-		do_signals;;
 		*)	 status=1
-		whiptail --title "Bye bye" --msgbox "Thanks for using mostly-a-SDR!" 8 78
+		whiptail --title "░▒▓ session closed ▓▒░" --msgbox "Carrier dropped.\n\nThanks for using mostly-a-SDR!" 10 78
 		;;
         esac
     done
+
+mas_outro
