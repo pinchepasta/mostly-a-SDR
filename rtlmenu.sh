@@ -290,6 +290,7 @@ edit_signal()
 		items+=("#hex" "Raw data bits: $hex" \
 			"#field" "Define / add a custom field" \
 			"#crc" "Checksum rule: $crc" \
+			"#keeloq" "Decode as KeeLoq (rolling-code remote)" \
 			"#render" "Render edited signal (.cu8 + .sub) and check it with rtl_433" \
 			"#send" "Transmit the edited signal")
 
@@ -305,6 +306,16 @@ edit_signal()
 			"#crc")
 				new=$(whiptail --inputbox "KIND FIRST_BYTE END_BYTE TARGET_BYTE\nKIND: sum8 | xor8 | crc8:POLY:INIT (hex), e.g.  crc8:31:00 0 4 4\nType none to disable." 11 78 "$crc" --title "Checksum" 3>&1 1>&2 2>&3) || continue
 				tool_try checksum "$pkt" "$new";;
+			"#keeloq")
+				new=$(whiptail --inputbox "64-bit manufacturer key in hex (leave empty to just show\nthe plaintext serial + encrypted hop code, no decrypt)." 10 78 "" --title "KeeLoq decode" 3>&1 1>&2 2>&3) || continue
+				tmp=$(mktemp)
+				if [ -n "$new" ]; then
+					python3 "$SDRTOOL" keeloq "$pkt" --key "$new" > "$tmp" 2>&1
+				else
+					python3 "$SDRTOOL" keeloq "$pkt" > "$tmp" 2>&1
+				fi
+				whiptail --title "KeeLoq" --scrolltext --textbox "$tmp" 22 82
+				rm -f "$tmp";;
 			"#render")
 				tool_try render "$pkt" "$edited" --sub "$sub" || continue
 				tmp=$(mktemp)

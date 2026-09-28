@@ -14,6 +14,19 @@ Works on the I/Q captures rtl_433 saves with -S (.cu8: unsigned 8 bit, interleav
   addfield PKT "name off len signed div bias"   define a custom field
   checksum PKT [SPEC]                  show / set checksum rule
   render  PKT OUT.cu8 [--sub OUT.sub]  re-encode the (edited) packet as I/Q (+ .sub)
+  keeloq  PKT [--key HEX]              decode a KeeLoq remote-control frame
+
+KeeLoq frames are PWM-coded, 66 bits: 32-bit hop code (encrypted) + 28-bit
+fixed code (usually a 28-bit serial, sometimes serial+button) + 2 status
+bits, sent MSB-first with a long sync gap before each repeat. 'analyze'
+detects the pulse widths the same way as any OOK signal; 'keeloq' then
+interprets the resulting 66/32/28-bit master value as a KeeLoq frame.
+Without --key only the plaintext (unencrypted) fields are shown: the 28-bit
+serial and the 32-bit hop code itself. With the correct 64-bit manufacturer
+key (--key, or a per-device key derived from it) the hop code is decrypted
+into button bits, an 8/16-bit counter and low-battery/repeat flags - this
+needs the manufacturer's secret key, which this tool does not supply or
+guess.
 
 Editor scope: OOK/ASK signals that use pulse-position (PPM) or pulse-width (PWM)
 coding - that covers most 433 MHz weather stations (Nexus/Prologue, LaCrosse, ...).
@@ -450,6 +463,90 @@ def bits_hex(bits):
     return format(int(pad, 2), "0%dx" % (len(pad) // 4)).upper()
 
 
+# ---------------------------------------------------------------- KeeLoq
+KEELOQ_NLF = 0x3A5C742E   # standard KeeLoq non-linear feedback function table
+
+
+def _nlf_bit(a, b, c, d, e):
+    idx = (a << 4) | (b << 3) | (c << 2) | (d << 1) | e
+    return (KEELOQ_NLF >> idx) & 1
+
+
+def keeloq_decrypt(key64, code32):
+    """Standard 528-round KeeLoq decryption (single 64-bit key)."""
+    x = code32 & 0xFFFFFFFF
+    for r in range(528):
+        k = (key64 >> ((15 - r) % 64)) & 1
+        nlf = _nlf_bit((x >> 31) & 1, (x >> 26) & 1, (x >> 20) & 1, (x >> 9) & 1, (x >> 1) & 1)
+        fb = nlf ^ (x & 1) ^ ((x >> 16) & 1) ^ k
+        x = ((x >> 1) | (fb << 31)) & 0xFFFFFFFF
+    return x
+
+
+def keeloq_encrypt(key64, code32):
+    x = code32 & 0xFFFFFFFF
+    for r in range(528):
+        k = (key64 >> (r % 64)) & 1
+        nlf = _nlf_bit((x >> 30) & 1, (x >> 25) & 1, (x >> 19) & 1, (x >> 8) & 1, (x >> 0) & 1)
+        fb = nlf ^ ((x >> 31) & 1) ^ ((x >> 15) & 1) ^ k
+        x = ((x << 1) | fb) & 0xFFFFFFFF
+    return x
+
+
+def keeloq_fields(m):
+    bits = m["master"]
+    n = len(bits)
+    if n not in (66, 64, 32):
+        raise ToolError("This packet is %d bits long; a KeeLoq frame is normally 66 bits "
+                        "(32-bit hop code + 28-bit fixed code + 2 status bits).\n"
+                        "It may not be a KeeLoq signal, or the OOK slicer merged/split rows "
+                        "differently - check 'analyze' output and the raw hex." % n)
+    hop = int(bits[0:32], 2)
+    fixed_bits = bits[32:]
+    out = {"hop_code": hop, "fixed_bits": fixed_bits}
+    if len(fixed_bits) >= 28:
+        serial = int(fixed_bits[0:28], 2)
+        out["serial"] = serial
+        rest = fixed_bits[28:]
+        if rest:
+            out["status_bits"] = rest
+    return out
+
+
+def cmd_keeloq(a):
+    m = load_pkt(a.pkt)
+    f = keeloq_fields(m)
+    print("Frame length : %d bits" % len(m["master"]))
+    print("Hop code     : 0x%08X  (encrypted)" % f["hop_code"])
+    if "serial" in f:
+        print("Serial       : 0x%07X  (%d, plaintext, 28-bit)" % (f["serial"], f["serial"]))
+    if f.get("status_bits"):
+        print("Status bits  : %s" % f["status_bits"])
+
+    if not a.key:
+        print("\nNo --key given: the hop code above is encrypted and can't be turned into\n"
+              "button / counter values without the transmitter's manufacturer key.")
+        return
+    try:
+        key = int(a.key.replace("0x", "").replace(" ", ""), 16)
+    except ValueError:
+        raise ToolError("--key must be 64-bit hex, e.g. 5CEC6701CF77F477")
+    if key.bit_length() > 64:
+        raise ToolError("--key must be at most 64 bits (16 hex digits).")
+    plain = keeloq_decrypt(key, f["hop_code"])
+    button = (plain >> 28) & 0xF
+    counter = plain & 0xFFFF
+    disc = (plain >> 16) & 0xFFF
+    print("\nDecrypted with the given key:")
+    print("  plaintext  : 0x%08X" % plain)
+    print("  button     : 0x%X  (%s)" % (button, format(button, "04b")))
+    print("  discr./ctr high bits: 0x%03X" % disc)
+    print("  counter    : %d (0x%04X)" % (counter, counter))
+    print("\nNote: which bits are 'button' vs 'counter' vs a device discriminant\n"
+          "varies by manufacturer/encoder (HCSxxx). Treat this split as a starting\n"
+          "point, not a guaranteed decode.")
+
+
 # ---------------------------------------------------------------- commands
 def load_pkt(path):
     try:
@@ -615,6 +712,8 @@ def main():
     p.add_argument("spec", nargs="?")
     p = add("render", cmd_render, "pkt", "out")
     p.add_argument("--sub")
+    p = add("keeloq", cmd_keeloq, "pkt")
+    p.add_argument("--key")
 
     a = ap.parse_args()
     try:
