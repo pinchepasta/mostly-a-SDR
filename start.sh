@@ -1,13 +1,5 @@
 #!/bin/bash
 
-# ==========================================================================
-#  mostly-a-SDR :: neon green / neon pink on black
-#  --------------------------------------------------------------------------
-#  Boot sequence, glitch banner, live backtitle, TX alert dialogs, outro.
-#  MAS_QUICK=1 ./script.sh   -> skip boot log / animation / key-wait
-#  Everything cosmetic is terminal-only and degrades to plain output when not
-#  attached to a UTF-8 tty, so piped / logged runs stay clean.
-# ==========================================================================
 
 # newt palette: "magenta" stands in for neon pink, "green" for neon green.
 export NEWT_COLORS='
@@ -177,10 +169,7 @@ mas_textrow()   # mas_textrow <text> <colour>
 	MAS_BUF+="${MAS_PINK}│ ${MAS_DIM}[${MAS_PINK}+${MAS_DIM}]${2} ${t}${MAS_OUT}${MAS_PINK} │${MAS_RST}"$'\n'
 }
 
-# ---------------------------------------------------------------------------
-# one-time banner data: logo rows padded to 58 cols, two-tone neon colouring
-# (solid blocks = green gradient, shadow strokes = pink), frame rules, sys info
-# ---------------------------------------------------------------------------
+
 mas_init()
 {
 	local i j c out cur want row head t
@@ -243,11 +232,7 @@ MAS_LOGO_EOF
 	fi
 }
 
-# ---------------------------------------------------------------------------
-# one banner frame. f = 0..F-1; the last frame is the settled, clean logo.
-#   phase 1: rows scan in out of static      phase 2: glitch decays
-#   equaliser + top strip + hex dump "lock" onto the signal as f -> F-1
-# ---------------------------------------------------------------------------
+
 mas_frame()
 {
 	local f=$1 F=$2 last=0 i j reveal gp maxh row body panel lvl off src lock
@@ -310,11 +295,7 @@ mas_frame()
 	MAS_BUF+="${MAS_PINK}${MAS_BOT}${MAS_RST}"$'\n'
 }
 
-# ---------------------------------------------------------------------------
-# pre-flight: real checks, cinematic delivery. Never blocks - missing pieces
-# are flagged so you know before a transmit silently does nothing.
-#   mas_check <label> <shell snippet whose stdout is the detail, exit 0 = ok>
-# ---------------------------------------------------------------------------
+
 mas_check()
 {
 	local label=$1 detail
@@ -331,8 +312,7 @@ mas_check()
 	return 0
 }
 
-# Blinking "press any key" hold - whiptail grabs the screen the instant it
-# starts, so without this the banner would never actually be seen.
+
 mas_prompt()
 {
 	local i k
@@ -386,7 +366,7 @@ show_banner()
 	trap - INT
 }
 
-# Short glitch-out when the session ends.
+
 mas_outro()
 {
 	[ -t 1 ] || return 0
@@ -414,6 +394,9 @@ mas_preflight()
 	mas_check "/dev/mem"    '[ -c /dev/mem ] && echo /dev/mem'
 	mas_check "resources"   '[ -d "$RESOURCES_LOCATION" ] && echo "$RESOURCES_LOCATION"'
 	mas_check "sub captures" '[ -d "$SUB_FILES_LOCATION" ] && echo "$SUB_FILES_LOCATION"'
+	mas_check "ffmpeg (DVB-T)" 'type -P ffmpeg'
+	mas_check "hacktv (lowres)" 'type -P hacktv'
+	mas_check "DVB-T modulator" 'set -- $MAS_DVBT_CMD; command -v "$1"'
 }
 
 abort_action=0
@@ -442,6 +425,14 @@ DEFAULT_RDS_PI="0x1234"
 DEFAULT_RDS_PS="rpitx-ui"
 DEFAULT_RDS_RT="rpitx-ui Broadcast WFM with RDS"
 DEFAULT_RDS_PE="50"
+
+MAS_DVBT_CMD="${MAS_DVBT_CMD:-dvbt-tsrfsend.py {ts}}"
+DEFAULT_DVBT_BW=8
+DEFAULT_DVBT_NAME="mostly-a-SDR"
+DEFAULT_DVBT_SOURCE="Test pattern"
+DVBT_VIDEO_PATTERN='\.(mp4|mkv|avi|mov|ts|mpg|mpeg|m2ts|webm)$'
+DVBT_PIDS=()
+DVBT_DIR=""
 LAST_ITEM="0 Tune"
 AUDIO_FILE_PATTERN='\.(aif|aiff|caf|flac|mp3|wav)$'
 
@@ -465,9 +456,7 @@ fi
 
 }
 
-# Reads the "Frequency:" line out of a Flipper Zero .sub RAW file and prints
-# it in MHz (e.g. "440.170000"). Prints nothing if the field is missing or
-# not a plain integer Hz value, so callers can fall back gracefully.
+
 do_sub_file_frequency_mhz()
 {
 	local file="$1" hz
@@ -672,7 +661,7 @@ else
 	return
 fi
 
-# PS name (Programme Service): 1-8 ASCII chars (RDS does not carry non-ASCII text)
+
 if RDS_PS=$(whiptail --inputbox "Enter RDS Programme Service name (1-8 ASCII chars):" 8 78 "$DEFAULT_RDS_PS" --title "RDS Programme Service (PS)" 3>&1 1>&2 2>&3); then
 	abort_action=0
 	if [ -z "$RDS_PS" ]; then
@@ -693,7 +682,7 @@ else
 	return
 fi
 
-# RT (RadioText): 1-64 ASCII chars (RDS does not carry non-ASCII text)
+
 if RDS_RT=$(whiptail --inputbox "Enter RDS RadioText (1-64 ASCII chars):" 8 78 "$DEFAULT_RDS_RT" --title "RDS RadioText (RT)" 3>&1 1>&2 2>&3); then
 	abort_action=0
 	if [ -z "$RDS_RT" ]; then
@@ -714,7 +703,7 @@ else
 	return
 fi
 
-# Pre-emphasis time constant: 50 us (Eu) or 75 us (Us)
+
 if RDS_PE=$(whiptail --default-item "$DEFAULT_RDS_PE" --title "FM pre-emphasis" --menu "Select pre-emphasis time constant:" 15 78 2 \
 	"50" "50 us - Europe, Africa, Asia, Oceania (ITU regions 1/3)" \
 	"75" "75 us - Americas, Japan (ITU region 2)" \
@@ -742,8 +731,374 @@ fi
 
 }
 
+do_dvbt_default_rate()
+{
+	case "$1" in
+		5) echo 2333000 ;;
+		6) echo 2799000 ;;
+		7) echo 3266000 ;;
+		*) echo 3732000 ;;
+	esac
+}
+
+do_enter_dvbt_params()
+{
+	LAST_ITEM="$menuchoice"
+
+	if DVBT_SOURCE=$(whiptail --default-item "$DEFAULT_DVBT_SOURCE" --title "DVB-T source" --menu "Select what to broadcast:" 15 78 2 \
+		"Test pattern" "Generated colour test card + 1 kHz tone (no file needed)" \
+		"Video file" "Loop a video file from $RESOURCES_LOCATION" \
+		3>&1 1>&2 2>&3); then
+		abort_action=0
+	else
+		abort_action=1
+		return
+	fi
+
+	DVBT_SRC_FILE=""
+	if [ "$DVBT_SOURCE" = "Video file" ]; then
+		do_file_choose "video (.mp4, .mkv, .avi, .mov, .ts, .mpg, .webm)" "$RESOURCES_LOCATION" "$DVBT_VIDEO_PATTERN"
+		[ "$abort_action" -eq 0 ] || return
+		DVBT_SRC_FILE="$FILE_LOC"
+	fi
+
+	if DVBT_BW=$(whiptail --default-item "$DEFAULT_DVBT_BW" --title "DVB-T channel bandwidth" --menu "Select channel bandwidth (MHz):" 15 78 4 \
+		"8" "8 MHz - UHF (Europe)" \
+		"7" "7 MHz - VHF band III (Europe)" \
+		"6" "6 MHz" \
+		"5" "5 MHz" \
+		3>&1 1>&2 2>&3); then
+		abort_action=0
+	else
+		abort_action=1
+		return
+	fi
+
+	local def_rate="${MAS_DVBT_MUXRATE:-$(do_dvbt_default_rate "$DVBT_BW")}"
+	if DVBT_RATE=$(whiptail --inputbox "TS bit rate in bit/s. The default fits QPSK 1/2, guard 1/4 in a ${DVBT_BW} MHz channel; raise it only if your modulator uses a faster mode (e.g. 16QAM/64QAM):" 10 78 "$def_rate" --title "DVB-T transport stream rate" 3>&1 1>&2 2>&3); then
+		if ! [[ "$DVBT_RATE" =~ ^[0-9]+$ ]] || [ "$DVBT_RATE" -lt 1000000 ] || [ "$DVBT_RATE" -gt 32000000 ]; then
+			whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "TS rate must be an integer between 1000000 and 32000000 bit/s!" 8 78
+			abort_action=1
+			return
+		fi
+	else
+		abort_action=1
+		return
+	fi
+
+	if DVBT_NAME=$(whiptail --inputbox "Service name shown in the receiver's channel list (1-16 ASCII chars):" 8 78 "$DEFAULT_DVBT_NAME" --title "DVB-T service name" 3>&1 1>&2 2>&3); then
+		if [ -z "$DVBT_NAME" ] || [ "${#DVBT_NAME}" -gt 16 ] || printf '%s' "$DVBT_NAME" | LC_ALL=C grep -q '[^ -~]'; then
+			whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "Service name must be 1-16 printable ASCII characters!" 8 78
+			abort_action=1
+			return
+		fi
+	else
+		abort_action=1
+		return
+	fi
+
+	abort_action=0
+}
+
+
+do_dvbt_start()
+{
+	local first hz vb ab=128000 cmd
+	local -a in_args
+
+	set -- $MAS_DVBT_CMD
+	first="$1"
+	if ! type -P ffmpeg >/dev/null; then
+		whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "ffmpeg not found - install it (sudo apt install ffmpeg)." 8 78
+		abort_action=1; return
+	fi
+	if [ -z "$first" ] || ! command -v "$first" >/dev/null 2>&1; then
+		whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "DVB-T modulator '${first:-<empty>}' not found.\n\nSet MAS_DVBT_CMD to a command that reads an MPEG-TS from {ts} and drives your SDR, e.g. realraum/hackrf-dvb-t, a GNU Radio gr-dtv flowgraph, or your own." 12 78
+		abort_action=1; return
+	fi
+
+	hz=$(awk -v m="$OUTPUT_FREQ" 'BEGIN{printf "%.0f", m * 1000000}')
+	vb=$(( (DVBT_RATE - ab) * 85 / 100 ))
+
+	if [ "$DVBT_SOURCE" = "Video file" ]; then
+		in_args=(-re -stream_loop -1 -i "$DVBT_SRC_FILE")
+	else
+		in_args=(-re -f lavfi -i "testsrc2=size=720x576:rate=25"
+		         -re -f lavfi -i "sine=frequency=1000:sample_rate=48000")
+	fi
+
+	DVBT_DIR=$(mktemp -d /tmp/mas-dvbt.XXXXXX) || { abort_action=1; return; }
+	mkfifo "$DVBT_DIR/tx.ts" || { abort_action=1; return; }
+
+	cmd=${MAS_DVBT_CMD//\{ts\}/$DVBT_DIR/tx.ts}
+	cmd=${cmd//\{freq_hz\}/$hz}
+	cmd=${cmd//\{freq_mhz\}/$OUTPUT_FREQ}
+	cmd=${cmd//\{bw_hz\}/$((DVBT_BW * 1000000))}
+
+	setsid ffmpeg -nostdin -loglevel error "${in_args[@]}" \
+		-vf "scale=720:576,fps=25,format=yuv420p" \
+		-c:v mpeg2video -b:v "$vb" -maxrate "$vb" -minrate "$vb" -bufsize "$((vb / 2))" -g 12 \
+		-c:a mp2 -b:a "$ab" -ar 48000 -ac 2 \
+		-f mpegts -muxrate "$DVBT_RATE" -mpegts_service_type digital_tv \
+		-metadata service_provider="mostly-a-SDR" -metadata service_name="$DVBT_NAME" \
+		-y "$DVBT_DIR/tx.ts" >"$DVBT_DIR/ffmpeg.log" 2>&1 &
+	DVBT_PIDS+=($!)
+
+	setsid bash -c "$cmd" >"$DVBT_DIR/modulator.log" 2>&1 &
+	DVBT_PIDS+=($!)
+
+
+	sleep 2
+	local p
+	for p in "${DVBT_PIDS[@]}"; do
+		if ! kill -0 "$p" 2>/dev/null; then
+			whiptail --title "░▒▓ DVB-T failed to start ▓▒░" --msgbox "$(tail -n 8 "$DVBT_DIR/modulator.log" "$DVBT_DIR/ffmpeg.log" 2>/dev/null | cut -c1-70)" 18 78
+			do_dvbt_cleanup
+			abort_action=1
+			return
+		fi
+	done
+	abort_action=0
+}
+
+do_dvbt_cleanup()
+{
+	local p
+	for p in "${DVBT_PIDS[@]}"; do
+		kill -TERM -- "-$p" 2>/dev/null || kill -TERM "$p" 2>/dev/null
+	done
+	# ffmpeg blocked on an unread FIFO ignores SIGTERM - escalate.
+	sleep 0.3
+	for p in "${DVBT_PIDS[@]}"; do
+		kill -KILL -- "-$p" 2>/dev/null || kill -KILL "$p" 2>/dev/null
+	done
+	DVBT_PIDS=()
+	[ -n "$DVBT_DIR" ] && rm -rf "$DVBT_DIR"
+	DVBT_DIR=""
+}
+
+do_dvbt_confirm_analogtv()
+{
+	whiptail --title "░▒▓ Analog TV ▓▒░" --yesno "Sends pictures as black-and-white, silent analogue TV on ${OUTPUT_FREQ} MHz (the PICTURE carrier - set it to your TV's channel, e.g. 471.25 for UHF ch 21). Needs a TV with an analogue tuner.\n\nOnly transmit into a dummy load / a few cm of wire next to the TV, or where licensed. rpitx is harmonic-rich: filter it if you use a real antenna.\n\nContinue?" 15 78
+}
+
+do_dvbt_confirm_lowtv()
+{
+	whiptail --title "░▒▓ Low-res TV ▓▒░" --yesno "This sends a very narrow analogue AM picture (about 200 kHz). Ordinary TVs and DVB-T tuners cannot show it; you need an SDR receiver or analogue-capable gear.\n\nOnly transmit on a frequency you are licensed for, or into a dummy load / very short wire. Filter the output - rpitx is harmonic-rich.\n\nContinue?" 14 78
+}
+
+do_dvbt_confirm()
+{
+	whiptail --title "░▒▓ DVB-T broadcast ▓▒░" --yesno "DVB-T occupies TV spectrum and can knock out real receivers nearby.\n\nOnly transmit into a dummy load / shielded cable, or on a frequency, bandwidth and power you are licensed for (e.g. amateur DATV with your callsign).\n\nRequires an external SDR + modulator (${MAS_DVBT_CMD%% *}); the Pi GPIO cannot carry DVB-T.\n\nContinue?" 16 78
+}
+
+
+LOWTV_PATTERN='\.(jpg|jpeg|png|bmp|gif|mp4|mkv|avi|mov|mpg|mpeg|webm)$'
+
+LOWTV_TMP=""
+LOWTV_IMG_PATTERN='\.(jpg|jpeg|png|bmp|gif)$'
+LOWTV_VID_PATTERN='\.(mp4|mkv|avi|mov|mpg|mpeg|webm)$'
+
+do_lowtv_cleanup() { [ -n "$LOWTV_TMP" ] && rm -rf "$LOWTV_TMP"; LOWTV_TMP=""; }
+
+# Picks what to send and sets LOWTV_INPUT (a hacktv input spec).
+do_lowtv_pick_source()
+{
+	local src f delay n k
+	local -a imgs args fl
+	if src=$(whiptail --title "TV source" --menu "Select what to broadcast:" 17 78 5 \
+		"Single image" "One still picture from $RESOURCES_LOCATION" \
+		"Slideshow" "Cycle through all pictures in $RESOURCES_LOCATION" \
+		"Text card" "White text on black (callsign / message)" \
+		"Video file" "Loop a video from $RESOURCES_LOCATION" \
+		"Colour bars" "Built-in test pattern" \
+		3>&1 1>&2 2>&3); then
+		abort_action=0
+	else
+		abort_action=1; return
+	fi
+
+	do_lowtv_cleanup
+	LOWTV_TMP=$(mktemp -d /tmp/mas-lowtv-src.XXXXXX) || { abort_action=1; return; }
+
+	case "$src" in
+	"Colour bars")
+		LOWTV_INPUT="test:colourbars" ;;
+	"Single image")
+		do_file_choose "still image (.jpg, .png, .bmp, .gif)" "$RESOURCES_LOCATION" "$LOWTV_IMG_PATTERN"
+		[ "$abort_action" -eq 0 ] || return
+		LOWTV_INPUT="ffmpeg:$FILE_LOC" ;;
+	"Video file")
+		do_file_choose "video (.mp4, .mkv, .avi, .mov, .mpg, .webm)" "$RESOURCES_LOCATION" "$LOWTV_VID_PATTERN"
+		[ "$abort_action" -eq 0 ] || return
+		LOWTV_INPUT="ffmpeg:$FILE_LOC" ;;
+	"Text card")
+		local text font
+		if ! text=$(whiptail --inputbox "Text to show (1-40 printable ASCII chars):" 8 78 "CQ CQ DE MOSTLY-A-SDR" --title "Text card" 3>&1 1>&2 2>&3); then
+			abort_action=1; return
+		fi
+		if [ -z "$text" ] || [ "${#text}" -gt 40 ] || printf '%s' "$text" | LC_ALL=C grep -q '[^ -~]'; then
+			whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "Text must be 1-40 printable ASCII characters!" 8 78
+			abort_action=1; return
+		fi
+		font=$(fc-match -f '%{file}' 'sans:bold' 2>/dev/null)
+		[ -f "$font" ] || font=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+		printf '%s' "$text" > "$LOWTV_TMP/card.txt"
+		if ! ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=black:s=768x576" \
+			-vf "drawtext=fontfile=${font}:textfile=$LOWTV_TMP/card.txt:expansion=none:fontcolor=white:fontsize=72:x=(w-text_w)/2:y=(h-text_h)/2" \
+			-frames:v 1 "$LOWTV_TMP/card.png" 2>"$LOWTV_TMP/card.log"; then
+			whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "Could not render the text card:\n$(tail -n 3 "$LOWTV_TMP/card.log" | cut -c1-70)" 10 78
+			abort_action=1; return
+		fi
+		LOWTV_INPUT="ffmpeg:$LOWTV_TMP/card.png" ;;
+	"Slideshow")
+		shopt -s nullglob nocaseglob
+		imgs=()
+		for f in "$RESOURCES_LOCATION"/*; do
+			[[ -f "$f" && "${f,,}" =~ $LOWTV_IMG_PATTERN ]] && imgs+=("$f")
+		done
+		shopt -u nullglob nocaseglob
+		n=${#imgs[@]}
+		if (( n < 2 )); then
+			whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "Slideshow needs at least 2 pictures in $RESOURCES_LOCATION (found $n)." 8 78
+			abort_action=1; return
+		fi
+		(( n > 20 )) && { imgs=("${imgs[@]:0:20}"); n=20; }
+		if ! delay=$(whiptail --default-item 10 --title "Slideshow" --menu "Seconds per picture ($n pictures):" 14 78 4 \
+			"3" "3 seconds" "5" "5 seconds" "10" "10 seconds" "30" "30 seconds" 3>&1 1>&2 2>&3); then
+			abort_action=1; return
+		fi
+		args=(); fl=""
+		for ((k = 0; k < n; k++)); do
+			args+=(-loop 1 -framerate 25 -t "$delay" -i "${imgs[k]}")
+			fl+="[$k:v]scale=768:576:force_original_aspect_ratio=decrease,pad=768:576:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25,format=yuv420p[v$k];"
+		done
+		for ((k = 0; k < n; k++)); do fl+="[v$k]"; done
+		fl+="concat=n=$n:v=1:a=0[out]"
+		if ! ffmpeg -nostdin -loglevel error -y "${args[@]}" -filter_complex "$fl" -map "[out]" \
+			-c:v mpeg2video -q:v 3 "$LOWTV_TMP/show.mkv" 2>"$LOWTV_TMP/show.log"; then
+			whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "Could not build the slideshow:\n$(tail -n 3 "$LOWTV_TMP/show.log" | cut -c1-70)" 10 78
+			abort_action=1; return
+		fi
+		LOWTV_INPUT="ffmpeg:$LOWTV_TMP/show.mkv" ;;
+	esac
+	abort_action=0
+}
+
+do_enter_lowtv_params()
+{
+	LAST_ITEM="$menuchoice"
+	if LOWTV_MODE=$(whiptail --title "Low-res TV mode" --menu "Select picture format:" 15 78 2 \
+		"240-am" "~29x220, 25 fps - very coarse picture (192 kS/s)" \
+		"30-am" "30 lines, 12.5 fps - Baird-style, 512 px wide" \
+		3>&1 1>&2 2>&3); then
+		abort_action=0
+	else
+		abort_action=1; return
+	fi
+	LOWTV_SR=192000
+	LOWTV_ARGS=""
+	do_lowtv_pick_source
+}
+
+# Real analogue TV squeezed into what rpitx can send. The sample rate is the
+# RF bandwidth: 3.0 MS/s = +-1.5 MHz around the PICTURE carrier, so the picture
+# is black and white (no colour subcarrier), silent, and only as wide as the
+# rate allows. OUTPUT_FREQ is the picture carrier (471.25 MHz = UHF ch 21).
+do_enter_analogtv_params()
+{
+	local adv lvl
+	LAST_ITEM="$menuchoice"
+
+	if LOWTV_MODE=$(whiptail --title "Analog TV standard" --menu "Select the TV standard of your set:" 17 78 5 \
+		"g" "PAL B/G, 625 lines - Germany / most of Europe" \
+		"i" "PAL I, 625 lines - UK / Ireland" \
+		"pal-d" "PAL D/K, 625 lines - Eastern Europe / China" \
+		"l" "SECAM L, 625 lines - France" \
+		"m" "NTSC-M, 525 lines - Americas / Japan" \
+		3>&1 1>&2 2>&3); then
+		abort_action=0
+	else
+		abort_action=1; return
+	fi
+
+	if LOWTV_SR=$(whiptail --title "Analog TV bandwidth" --menu "Signal bandwidth (= sample rate):" 17 78 5 \
+		"192000" "Basic - stock sendiq, ~12 px wide (coarse bars)" \
+		"2000000" "Medium - ~100 px wide, needs sendiq MAX_SAMPLERATE raised" \
+		"2500000" "Good - ~130 px wide, needs raised MAX_SAMPLERATE" \
+		"3000000" "Full - ~156 px wide, needs raised MAX_SAMPLERATE" \
+		"custom" "Enter a sample rate yourself" \
+		3>&1 1>&2 2>&3); then
+		abort_action=0
+	else
+		abort_action=1; return
+	fi
+	if [ "$LOWTV_SR" = "custom" ]; then
+		if ! LOWTV_SR=$(whiptail --inputbox "Sample rate in Hz (100000-3400000):" 8 78 "3000000" --title "Custom bandwidth" 3>&1 1>&2 2>&3); then
+			abort_action=1; return
+		fi
+		if ! [[ "$LOWTV_SR" =~ ^[0-9]+$ ]] || [ "$LOWTV_SR" -lt 100000 ] || [ "$LOWTV_SR" -gt 3400000 ]; then
+			whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "Sample rate must be an integer between 100000 and 3400000!" 8 78
+			abort_action=1; return
+		fi
+	fi
+
+	if ! adv=$(whiptail --title "Signal options" --checklist "Toggle with SPACE:" 16 78 4 \
+		"filter" "VSB filter: trims the lower sideband (narrower signal)" OFF \
+		"invert" "Invert video (try if the picture looks like a negative)" OFF \
+		"interlace" "Update the picture every field (smoother video)" OFF \
+		"vits" "Add VITS test lines (helps some sets lock)" OFF \
+		3>&1 1>&2 2>&3); then
+		abort_action=1; return
+	fi
+
+	if ! lvl=$(whiptail --inputbox "Video output level (0.1 - 1.0). Lower it if the picture is washed out or crushed:" 9 78 "1.0" --title "Output level" 3>&1 1>&2 2>&3); then
+		abort_action=1; return
+	fi
+	if ! [[ "$lvl" =~ ^(0?\.[0-9]+|1(\.0+)?)$ ]] || ! awk -v l="$lvl" 'BEGIN{exit !(l+0 >= 0.1 && l+0 <= 1)}'; then
+		whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "Level must be a number from 0.1 to 1.0!" 8 78
+		abort_action=1; return
+	fi
+
+	LOWTV_ARGS="--nocolour --noaudio --level $lvl"
+	[[ " ${adv//\"/} " == *" filter "* ]]    && LOWTV_ARGS+=" --filter"
+	[[ " ${adv//\"/} " == *" invert "* ]]    && LOWTV_ARGS+=" --invert-video"
+	[[ " ${adv//\"/} " == *" interlace "* ]] && LOWTV_ARGS+=" --interlace"
+	[[ " ${adv//\"/} " == *" vits "* ]]      && LOWTV_ARGS+=" --vits"
+
+	do_lowtv_pick_source
+}
+
+do_lowtv_start()
+{
+	local sr t log
+	for t in hacktv sendiq; do
+		if ! type -P "$t" >/dev/null; then
+			whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "$t not found (hacktv: sudo apt install hacktv)." 8 78
+			abort_action=1; return
+		fi
+	done
+
+	sr=${LOWTV_SR:-192000}
+	log=$(mktemp /tmp/mas-lowtv.XXXXXX)
+	( hacktv -o file:- -t float -m "$LOWTV_MODE" -s "$sr" $LOWTV_ARGS -r "$LOWTV_INPUT" 2>>"$log.hacktv" \
+		| sudo sendiq -i /dev/stdin -s "$sr" -f "${OUTPUT_FREQ}e6" -t float >"$log" 2>&1 ) &
+	sleep 2
+	if ! pgrep -x sendiq >/dev/null; then
+		local msg hint=""
+		msg=$(tail -n 6 "$log" 2>/dev/null | cut -c1-70)
+		grep -q 'too high' "$log" 2>/dev/null && hint="\n\nYour sendiq only accepts up to 200 kS/s. For the full analogue mode raise MAX_SAMPLERATE in sendiq.cpp (e.g. to 4000000), rebuild rpitx, or use the basic 192 kS/s option."
+		whiptail --title "░▒▓ sendiq did not start ▓▒░" --msgbox "sendiq said:\n${msg:-<nothing>}${hint}\n\n(hacktv log: $log.hacktv)" 18 78
+		abort_action=1; return
+	fi
+	rm -f "$log"
+	abort_action=0
+}
+
 do_stop_transmit()
 {
+	sudo killall hacktv 2>/dev/null
+	do_lowtv_cleanup
 	sudo killall csdr 2>/dev/null
 	sudo killall freedv 2>/dev/null
 	sudo killall piam 2>/dev/null
@@ -781,6 +1136,7 @@ do_stop_transmit()
 			13\ *) sudo killall testmorse.sh >/dev/null 2>/dev/null ;;
 			14\ *) sudo killall testrfgen.sh >/dev/null 2>/dev/null ;;
 			15\ *) sudo killall testsub.sh >/dev/null 2>/dev/null ;;
+			16\ *) do_dvbt_cleanup ;;
 
 	esac
 }
@@ -795,9 +1151,6 @@ do_status()
 	do_stop_transmit
 }
 
-#********************************
-# User interface initialization *
-#********************************
 
 show_banner
 do_freq_setup
@@ -823,6 +1176,9 @@ do_freq_setup
     "13 CW" "Continuous Wave (Morse code)" \
     "14 RFgen" "Wideband RF generator" \
     "15 Sub-GHz" "Replay a Flipper Zero .sub RAW capture" \
+    "16 DVB-T" "Digital TV broadcast (external SDR modulator)" \
+    "17 Low-res TV" "Slow analogue picture/video via rpitx (no SDR TX)" \
+    "18 Analog TV" "Pictures/slideshow/text to a real analogue TV (B/W, freq = picture carrier)" \
  	3>&2 2>&1 1>&3)
 		RET=$?
 		if [ $RET -eq 1 ]; then
@@ -973,6 +1329,35 @@ do_freq_setup
 						testsub.sh "$FILE_LOC" "$PLAYBACK_MODE" "$REPEAT_COUNT" >/dev/null 2>/dev/null &
 						do_status "${SUB_FREQ_MHZ:-$OUTPUT_FREQ}"
 					fi
+				fi
+			fi
+			;;
+
+			16\ *) if do_dvbt_confirm; then
+				do_enter_dvbt_params
+				if [ $abort_action -eq 0 ]; then
+					do_dvbt_start
+					if [ $abort_action -eq 0 ]; then
+						do_status "$OUTPUT_FREQ (DVB-T ${DVBT_BW} MHz)"
+					fi
+				fi
+			fi
+			;;
+
+			17\ *) if do_dvbt_confirm_lowtv; then
+				do_enter_lowtv_params
+				if [ $abort_action -eq 0 ]; then
+					do_lowtv_start
+					[ $abort_action -eq 0 ] && do_status "$OUTPUT_FREQ ($LOWTV_MODE)"
+				fi
+			fi
+			;;
+
+			18\ *) if do_dvbt_confirm_analogtv; then
+				do_enter_analogtv_params
+				if [ $abort_action -eq 0 ]; then
+					do_lowtv_start
+					[ $abort_action -eq 0 ] && do_status "$OUTPUT_FREQ (picture carrier, $LOWTV_MODE)"
 				fi
 			fi
 			;;
