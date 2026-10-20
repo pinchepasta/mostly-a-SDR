@@ -1,0 +1,57 @@
+rtl_433 version 25.02 (2025-02-19) inputs file rtl_tcp RTL-SDR SoapySDR
+Found Rafael Micro R820T tuner
+[102;92m[[30mSDR[92m][0m Using device 0: Generic, RTL2832U, SN: 77771111153705700, "Generic RTL2832U"
+Exact sample rate is: 250000.000414 Hz
+Enabled direct sampling mode, input 2
+[R82XX] PLL not locked!
+Disabled direct sampling mode
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+time      : 2026-09-28 13:38:12
+model     : Microchip-HCS200                       id        : DB7152B
+Battery   : 0            Button    : 2             Learn mode: 0             Repeat    : 1             encrypted : 4E12FD19
+Modulation: ASK          Freq      : 433.9 MHz
+RSSI      : -0.1 dB      SNR       : 36.0 dB       Noise     : -36.1 dB
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+time      : 2026-09-28 13:38:12
+model     : Microchip-HCS200                       id        : DB7152B
+Battery   : 0            Button    : 2             Learn mode: 0             Repeat    : 1             encrypted : 4E12FD19
+Modulation: ASK          Freq      : 433.9 MHz
+RSSI      : -0.1 dB      SNR       : 37.3 dB       Noise     : -37.4 dB
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+time      : 2026-09-28 13:38:12
+model     : Microchip-HCS200                       id        : DB7152B
+Battery   : 0            Button    : 2             Learn mode: 0             Repeat    : 1             encrypted : 4E12FD19
+Modulation: ASK          Freq      : 433.9 MHz
+RSSI      : -0.1 dB      SNR       : 39.0 dB       Noise     : -39.1 dB
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+time      : 2026-09-28 13:38:13
+model     : Microchip-HCS200                       id        : DB7152B
+Battery   : 0            Button    : 2             Learn mode: 0             Repeat    : 1             encrypted : 4E12FD19
+Modulation: ASK          Freq      : 433.9 MHz
+RSSI      : -0.1 dB      SNR       : 39.0 dB       Noise     : -39.1 dB
+*** Saving signal to file g001_433.92M_250k.cu8 (138882 samples, 393216 bytes)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+time      : 2026-09-28 13:39:31
+model     : Microchip-HCS200                       id        : DB7152B
+Battery   : 0            Button    : 2             Learn mode: 0             Repeat    : 1             encrypted : 4E12FD19
+Modulation: ASK          Freq      : 433.9 MHz
+RSSI      : -3.9 dB      SNR       : 38.3 dB       Noise     : -42.1 dB
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+time      : 2026-09-28 13:39:31
+model     : Microchip-HCS200                       id        : DB7152B
+Battery   : 0            Button    : 2             Learn mode: 0             Repeat    : 1             encrypted : 4E12FD19
+Modulation: ASK          Freq      : 433.9 MHz
+RSSI      : -3.8 dB      SNR       : 35.3 dB       Noise     : -39.1 dB
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+time      : 2026-09-28 13:39:31
+model     : Microchip-HCS200                       id        : DB7152B
+Battery   : 0            Button    : 2             Learn mode: 0             Repeat    : 1             encrypted : 4E12FD19
+Modulation: ASK          Freq      : 433.9 MHz
+RSSI      : -3.5 dB      SNR       : 35.7 dB       Noise     : -39.1 dB
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+time      : 2026-09-28 13:39:31
+model     : Microchip-HCS200                       id        : DB7152B
+Battery   : 0            Button    : 2             Learn mode: 0             Repeat    : 1             encrypted : 4E12FD19
+Modulation: ASK          Freq      : 433.9 MHz
+RSSI      : -2.9 dB      SNR       : 36.2 dB       Noise     : -39.1 dB
+*** Saving signal to file g002_433.92M_250k.cu8 (138879 samples, 393216 bytes)

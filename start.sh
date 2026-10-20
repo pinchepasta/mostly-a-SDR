@@ -1,5 +1,13 @@
 #!/bin/bash
 
+# ==========================================================================
+#  mostly-a-SDR :: neon green / neon pink on black
+#  --------------------------------------------------------------------------
+#  Boot sequence, glitch banner, live backtitle, TX alert dialogs, outro.
+#  MAS_QUICK=1 ./script.sh   -> skip boot log / animation / key-wait
+#  Everything cosmetic is terminal-only and degrades to plain output when not
+#  attached to a UTF-8 tty, so piped / logged runs stay clean.
+# ==========================================================================
 
 # newt palette: "magenta" stands in for neon pink, "green" for neon green.
 export NEWT_COLORS='
@@ -169,7 +177,10 @@ mas_textrow()   # mas_textrow <text> <colour>
 	MAS_BUF+="${MAS_PINK}│ ${MAS_DIM}[${MAS_PINK}+${MAS_DIM}]${2} ${t}${MAS_OUT}${MAS_PINK} │${MAS_RST}"$'\n'
 }
 
-
+# ---------------------------------------------------------------------------
+# one-time banner data: logo rows padded to 58 cols, two-tone neon colouring
+# (solid blocks = green gradient, shadow strokes = pink), frame rules, sys info
+# ---------------------------------------------------------------------------
 mas_init()
 {
 	local i j c out cur want row head t
@@ -232,7 +243,11 @@ MAS_LOGO_EOF
 	fi
 }
 
-
+# ---------------------------------------------------------------------------
+# one banner frame. f = 0..F-1; the last frame is the settled, clean logo.
+#   phase 1: rows scan in out of static      phase 2: glitch decays
+#   equaliser + top strip + hex dump "lock" onto the signal as f -> F-1
+# ---------------------------------------------------------------------------
 mas_frame()
 {
 	local f=$1 F=$2 last=0 i j reveal gp maxh row body panel lvl off src lock
@@ -295,7 +310,11 @@ mas_frame()
 	MAS_BUF+="${MAS_PINK}${MAS_BOT}${MAS_RST}"$'\n'
 }
 
-
+# ---------------------------------------------------------------------------
+# pre-flight: real checks, cinematic delivery. Never blocks - missing pieces
+# are flagged so you know before a transmit silently does nothing.
+#   mas_check <label> <shell snippet whose stdout is the detail, exit 0 = ok>
+# ---------------------------------------------------------------------------
 mas_check()
 {
 	local label=$1 detail
@@ -312,7 +331,8 @@ mas_check()
 	return 0
 }
 
-
+# Blinking "press any key" hold - whiptail grabs the screen the instant it
+# starts, so without this the banner would never actually be seen.
 mas_prompt()
 {
 	local i k
@@ -366,7 +386,7 @@ show_banner()
 	trap - INT
 }
 
-
+# Short glitch-out when the session ends.
 mas_outro()
 {
 	[ -t 1 ] || return 0
@@ -396,6 +416,8 @@ mas_preflight()
 	mas_check "sub captures" '[ -d "$SUB_FILES_LOCATION" ] && echo "$SUB_FILES_LOCATION"'
 	mas_check "ffmpeg (DVB-T)" 'type -P ffmpeg'
 	mas_check "hacktv (lowres)" 'type -P hacktv'
+	mas_check "arecord (RF mic)" 'type -P arecord'
+	mas_check "python3+numpy (RF mic)" 'python3 -c "import numpy" 2>/dev/null && echo ok'
 	mas_check "DVB-T modulator" 'set -- $MAS_DVBT_CMD; command -v "$1"'
 }
 
@@ -425,7 +447,22 @@ DEFAULT_RDS_PI="0x1234"
 DEFAULT_RDS_PS="rpitx-ui"
 DEFAULT_RDS_RT="rpitx-ui Broadcast WFM with RDS"
 DEFAULT_RDS_PE="50"
-
+# --- DVB-T ------------------------------------------------------------------
+# The Pi's GPIO/rpitx path tops out around 3.4 MS/s with coarse amplitude
+# steps - far too little for DVB-T (5-8 MHz OFDM needs 5.7-9.1 MS/s and a
+# clean signal). So DVB-T goes through an EXTERNAL modulator + SDR (HackRF,
+# ADALM-Pluto, LimeSDR, ...). This script builds the MPEG-TS with ffmpeg and
+# pipes it (via a FIFO) into whatever modulator command you configure:
+#
+#   MAS_DVBT_CMD   command template, placeholders are substituted:
+#                    {ts}       FIFO the transport stream is written to
+#                    {freq_hz}  frequency from the main menu, in Hz
+#                    {freq_mhz} same, in MHz
+#                    {bw_hz}    channel bandwidth in Hz (5/6/7/8 MHz)
+#                  Default drives realraum/hackrf-dvb-t (reads a TS file; its
+#                  constellation/FEC/guard/frequency live in dvbtconfig.py).
+#   MAS_DVBT_MUXRATE  override the TS bit rate (bit/s); must match the payload
+#                  rate of the modulation parameters your modulator uses.
 MAS_DVBT_CMD="${MAS_DVBT_CMD:-dvbt-tsrfsend.py {ts}}"
 DEFAULT_DVBT_BW=8
 DEFAULT_DVBT_NAME="mostly-a-SDR"
@@ -456,7 +493,9 @@ fi
 
 }
 
-
+# Reads the "Frequency:" line out of a Flipper Zero .sub RAW file and prints
+# it in MHz (e.g. "440.170000"). Prints nothing if the field is missing or
+# not a plain integer Hz value, so callers can fall back gracefully.
 do_sub_file_frequency_mhz()
 {
 	local file="$1" hz
@@ -661,7 +700,7 @@ else
 	return
 fi
 
-
+# PS name (Programme Service): 1-8 ASCII chars (RDS does not carry non-ASCII text)
 if RDS_PS=$(whiptail --inputbox "Enter RDS Programme Service name (1-8 ASCII chars):" 8 78 "$DEFAULT_RDS_PS" --title "RDS Programme Service (PS)" 3>&1 1>&2 2>&3); then
 	abort_action=0
 	if [ -z "$RDS_PS" ]; then
@@ -682,7 +721,7 @@ else
 	return
 fi
 
-
+# RT (RadioText): 1-64 ASCII chars (RDS does not carry non-ASCII text)
 if RDS_RT=$(whiptail --inputbox "Enter RDS RadioText (1-64 ASCII chars):" 8 78 "$DEFAULT_RDS_RT" --title "RDS RadioText (RT)" 3>&1 1>&2 2>&3); then
 	abort_action=0
 	if [ -z "$RDS_RT" ]; then
@@ -703,7 +742,7 @@ else
 	return
 fi
 
-
+# Pre-emphasis time constant: 50 us (Eu) or 75 us (Us)
 if RDS_PE=$(whiptail --default-item "$DEFAULT_RDS_PE" --title "FM pre-emphasis" --menu "Select pre-emphasis time constant:" 15 78 2 \
 	"50" "50 us - Europe, Africa, Asia, Oceania (ITU regions 1/3)" \
 	"75" "75 us - Americas, Japan (ITU region 2)" \
@@ -731,6 +770,12 @@ fi
 
 }
 
+# ---------------------------------------------------------------------------
+# DVB-T (external SDR modulator - see the MAS_DVBT_CMD notes at the top)
+# ---------------------------------------------------------------------------
+
+# Conservative payload rate (bit/s) for QPSK 1/2, guard 1/4 - the most robust
+# DVB-T mode - per channel bandwidth in MHz.
 do_dvbt_default_rate()
 {
 	case "$1" in
@@ -800,7 +845,8 @@ do_enter_dvbt_params()
 	abort_action=0
 }
 
-
+# Builds the TS with ffmpeg into a FIFO and starts the modulator on the other
+# end. Sets abort_action=1 (and shows why) if anything is missing or dies early.
 do_dvbt_start()
 {
 	local first hz vb ab=128000 cmd
@@ -847,7 +893,8 @@ do_dvbt_start()
 	setsid bash -c "$cmd" >"$DVBT_DIR/modulator.log" 2>&1 &
 	DVBT_PIDS+=($!)
 
-
+	# Both ends must still be alive shortly after start, otherwise the "TX
+	# LIVE" dialog would be lying (no SDR attached, bad flags, ...).
 	sleep 2
 	local p
 	for p in "${DVBT_PIDS[@]}"; do
@@ -892,7 +939,12 @@ do_dvbt_confirm()
 	whiptail --title "░▒▓ DVB-T broadcast ▓▒░" --yesno "DVB-T occupies TV spectrum and can knock out real receivers nearby.\n\nOnly transmit into a dummy load / shielded cable, or on a frequency, bandwidth and power you are licensed for (e.g. amateur DATV with your callsign).\n\nRequires an external SDR + modulator (${MAS_DVBT_CMD%% *}); the Pi GPIO cannot carry DVB-T.\n\nContinue?" 16 78
 }
 
-
+# ---------------------------------------------------------------------------
+# Low-res analogue TV through rpitx: hacktv renders a very low-line AM picture
+# as IQ (about 1 MS/s, well inside what sendiq can do) and pipes it to sendiq.
+# Not receivable by ordinary TVs / DVB-T tuners - needs an SDR receiver or
+# analogue-capable gear tuned to the frequency.
+# ---------------------------------------------------------------------------
 LOWTV_PATTERN='\.(jpg|jpeg|png|bmp|gif|mp4|mkv|avi|mov|mpg|mpeg|webm)$'
 
 LOWTV_TMP=""
@@ -1078,7 +1130,10 @@ do_lowtv_start()
 			abort_action=1; return
 		fi
 	done
-
+	# NOTE: stock sendiq accepts at most 200000 samples/s (MAX_SAMPLERATE in
+	# sendiq.cpp) and above that only drops samples with no filtering. So the
+	# slow modes run at 192 kS/s natively; only the "full" analogue mode
+	# (3 MS/s) needs a sendiq rebuilt with a higher MAX_SAMPLERATE.
 	sr=${LOWTV_SR:-192000}
 	log=$(mktemp /tmp/mas-lowtv.XXXXXX)
 	( hacktv -o file:- -t float -m "$LOWTV_MODE" -s "$sr" $LOWTV_ARGS -r "$LOWTV_INPUT" 2>>"$log.hacktv" \
@@ -1095,8 +1150,210 @@ do_lowtv_start()
 	abort_action=0
 }
 
+# ---------------------------------------------------------------------------
+# RF mic: live audio (USB sound card / line-in) -> analogue FM -> sendiq.
+# The FM modulator is a small numpy script written to /tmp at start. IQ rate is
+# 192 kS/s, just under sendiq's 200 kS/s limit, so it needs no rebuild.
+# Chain: gain -> pre-emphasis -> soft limiter -> 15 kHz lowpass -> FM.
+# ---------------------------------------------------------------------------
+MIC_DIR=""
+MIC_ACTIVE=0
+
+do_mic_write_modulator()
+{
+	cat > "$MIC_DIR/fmmod.py" <<'PYEOF'
+import sys, argparse
+import numpy as np
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--dev", type=float, default=40000.0)   # peak deviation, Hz
+ap.add_argument("--gain-db", type=float, default=0.0)
+ap.add_argument("--preemph-us", type=float, default=0.0)
+ap.add_argument("--tone", action="store_true")          # 1 kHz test tone
+a = ap.parse_args()
+
+FS_IN, UP = 48000, 4
+FS = FS_IN * UP                                          # 192000
+BLK = 960                                                # 20 ms
+
+# 15 kHz lowpass at FS; also removes the images from zero-stuffing
+N = 255
+fc = 15000.0 / FS
+n = np.arange(N) - (N - 1) / 2
+h = np.sinc(2 * fc * n) * np.hamming(N)
+h *= UP / h.sum()
+
+gain = 10 ** (a.gain_db / 20.0)
+k = a.preemph_us * 1e-6 * FS_IN                          # pre-emphasis: 1 + s*tau
+knee = 0.7
+
+hist = np.zeros(N - 1)
+prev = 0.0
+phase = 0.0
+tone_ph = 0.0
+out = sys.stdout.buffer
+inp = sys.stdin.buffer
+
+while True:
+    if a.tone:
+        t = tone_ph + 2 * np.pi * 1000.0 / FS_IN * np.arange(BLK)
+        tone_ph = (t[-1] + 2 * np.pi * 1000.0 / FS_IN) % (2 * np.pi)
+        x = 0.5 * np.sin(t)
+    else:
+        raw = inp.read(BLK * 2)
+        if len(raw) < BLK * 2:
+            break
+        x = np.frombuffer(raw, dtype="<i2").astype(np.float64) / 32768.0
+    x = x * gain
+    if k > 0:
+        d = np.diff(np.concatenate(([prev], x)))
+        prev = x[-1]
+        x = x + k * d
+    ax = np.abs(x)
+    x = np.where(ax <= knee, x,
+                 np.sign(x) * (knee + (1 - knee) * np.tanh((ax - knee) / (1 - knee))))
+    u = np.zeros(BLK * UP)
+    u[::UP] = x
+    ext = np.concatenate((hist, u))
+    y = np.convolve(ext, h, mode="valid")
+    hist = ext[-(N - 1):]
+    y = np.clip(y, -1.0, 1.0)
+    ph = phase + np.cumsum(2 * np.pi * a.dev * y / FS)
+    phase = ph[-1] % (2 * np.pi)
+    out.write(np.exp(1j * ph).astype(np.complex64).tobytes())
+    out.flush()
+PYEOF
+}
+
+do_enter_mic_params()
+{
+	local line c d name
+	local -a items=()
+	LAST_ITEM="$menuchoice"
+
+	items+=("default" "System default input")
+	while IFS= read -r line; do
+		if [[ "$line" =~ ^card\ ([0-9]+):\ [^\[]*\[([^\]]*)\],\ device\ ([0-9]+): ]]; then
+			c=${BASH_REMATCH[1]}; name=${BASH_REMATCH[2]}; d=${BASH_REMATCH[3]}
+			items+=("plughw:$c,$d" "$name (card $c, device $d)")
+		fi
+	done < <(arecord -l 2>/dev/null)
+	items+=("tone" "1 kHz test tone (no microphone needed)")
+
+	if MIC_DEV=$(whiptail --title "RF mic input" --menu "Select the audio input:" 18 78 6 "${items[@]}" 3>&1 1>&2 2>&3); then
+		abort_action=0
+	else
+		abort_action=1; return
+	fi
+
+	if MIC_DEV_HZ=$(whiptail --default-item 40000 --title "FM deviation" --menu "Peak deviation (set to match your receiver):" 16 78 5 \
+		"5000" "+-5 kHz   narrowband FM, voice comms" \
+		"12500" "+-12.5 kHz narrow FM" \
+		"25000" "+-25 kHz" \
+		"40000" "+-40 kHz  typical wireless microphone" \
+		"50000" "+-50 kHz  maximum at 192 kS/s" \
+		3>&1 1>&2 2>&3); then
+		abort_action=0
+	else
+		abort_action=1; return
+	fi
+
+	if MIC_PREEMPH=$(whiptail --title "Pre-emphasis" --menu "Boosts treble before FM. Use it only if your receiver applies matching de-emphasis:" 14 78 3 \
+		"0" "None (default)" \
+		"50" "50 us (Europe)" \
+		"75" "75 us (US)" \
+		3>&1 1>&2 2>&3); then
+		abort_action=0
+	else
+		abort_action=1; return
+	fi
+
+	if ! MIC_GAIN=$(whiptail --inputbox "Input gain in dB (-30 to 40). The limiter prevents over-deviation, but too much gain distorts:" 9 78 "0" --title "Input gain" 3>&1 1>&2 2>&3); then
+		abort_action=1; return
+	fi
+	if ! [[ "$MIC_GAIN" =~ ^-?[0-9]+(\.[0-9]+)?$ ]] || ! awk -v g="$MIC_GAIN" 'BEGIN{exit !(g >= -30 && g <= 40)}'; then
+		whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "Gain must be a number from -30 to 40!" 8 78
+		abort_action=1; return
+	fi
+	abort_action=0
+}
+
+do_mic_start()
+{
+	local t log bad msg
+	local -a modargs
+	for t in python3 sendiq; do
+		if ! type -P "$t" >/dev/null; then
+			whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "$t not found." 8 78
+			abort_action=1; return
+		fi
+	done
+	if [ "$MIC_DEV" != "tone" ] && ! type -P arecord >/dev/null; then
+		whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "arecord not found (sudo apt install alsa-utils)." 8 78
+		abort_action=1; return
+	fi
+	if ! python3 -c "import numpy" 2>/dev/null; then
+		whiptail --title "░▒▓ ERROR ▓▒░" --msgbox "python3-numpy missing (sudo apt install python3-numpy)." 8 78
+		abort_action=1; return
+	fi
+
+	do_mic_cleanup
+	MIC_DIR=$(mktemp -d /tmp/mas-mic.XXXXXX) || { abort_action=1; return; }
+	do_mic_write_modulator
+	log="$MIC_DIR"
+	modargs=(--dev "$MIC_DEV_HZ" --gain-db "$MIC_GAIN" --preemph-us "$MIC_PREEMPH")
+
+	if [ "$MIC_DEV" = "tone" ]; then
+		( python3 "$MIC_DIR/fmmod.py" "${modargs[@]}" --tone 2>"$log/mod.log" \
+			| sudo sendiq -i /dev/stdin -s 192000 -f "${OUTPUT_FREQ}e6" -t float >"$log/sendiq.log" 2>&1 ) &
+	else
+		( arecord -q -D "$MIC_DEV" -f S16_LE -r 48000 -c 1 -t raw 2>"$log/arecord.log" \
+			| python3 "$MIC_DIR/fmmod.py" "${modargs[@]}" 2>"$log/mod.log" \
+			| sudo sendiq -i /dev/stdin -s 192000 -f "${OUTPUT_FREQ}e6" -t float >"$log/sendiq.log" 2>&1 ) &
+	fi
+	MIC_ACTIVE=1
+	sleep 2
+
+	# every stage must still be alive, otherwise "TX LIVE" would be a lie
+	bad=""
+	pgrep -x sendiq >/dev/null || bad="sendiq"
+	pgrep -f "$MIC_DIR/fmmod.py" >/dev/null || bad="${bad:+$bad, }modulator"
+	if [ "$MIC_DEV" != "tone" ]; then
+		pgrep -x arecord >/dev/null || bad="${bad:+$bad, }arecord"
+	fi
+	if [ -n "$bad" ]; then
+		msg=$(tail -qn 3 "$log/arecord.log" "$log/mod.log" "$log/sendiq.log" 2>/dev/null | cut -c1-70)
+		whiptail --title "░▒▓ RF mic failed to start ▓▒░" --msgbox "Not running: $bad\n\n${msg:-<no output>}\n\nCheck the input name with: arecord -l\nIf PipeWire/PulseAudio holds the device, choose 'default'." 18 78
+		do_mic_stop
+		abort_action=1; return
+	fi
+	abort_action=0
+}
+
+do_mic_stop()
+{
+	[ "$MIC_ACTIVE" -eq 1 ] || return 0
+	[ -n "$MIC_DIR" ] && pkill -f "$MIC_DIR/fmmod.py" 2>/dev/null
+	pkill -x arecord 2>/dev/null
+	sudo killall sendiq 2>/dev/null
+	MIC_ACTIVE=0
+}
+
+do_mic_cleanup()
+{
+	do_mic_stop
+	[ -n "$MIC_DIR" ] && rm -rf "$MIC_DIR"
+	MIC_DIR=""
+}
+
+do_confirm_mic()
+{
+	whiptail --title "░▒▓ RF mic ▓▒░" --yesno "Sends live audio as analogue FM on ${OUTPUT_FREQ} MHz, for a wireless-mic receiver or any FM/NFM radio set to the same frequency and deviation.\n\nGermany has general allocations for type-approved wireless mics (e.g. 863-865 MHz), but a homemade rpitx transmitter is not type-approved and puts out harmonics. Keep it to a few cm of wire / dummy load, and filter it before using a real antenna.\n\nContinue?" 17 78
+}
+
 do_stop_transmit()
 {
+	do_mic_stop
 	sudo killall hacktv 2>/dev/null
 	do_lowtv_cleanup
 	sudo killall csdr 2>/dev/null
@@ -1151,6 +1408,9 @@ do_status()
 	do_stop_transmit
 }
 
+#********************************
+# User interface initialization *
+#********************************
 
 show_banner
 do_freq_setup
@@ -1179,6 +1439,7 @@ do_freq_setup
     "16 DVB-T" "Digital TV broadcast (external SDR modulator)" \
     "17 Low-res TV" "Slow analogue picture/video via rpitx (no SDR TX)" \
     "18 Analog TV" "Pictures/slideshow/text to a real analogue TV (B/W, freq = picture carrier)" \
+    "19 RF Mic" "Live mic/line audio as FM, wireless-mic style (USB sound card)" \
  	3>&2 2>&1 1>&3)
 		RET=$?
 		if [ $RET -eq 1 ]; then
@@ -1358,6 +1619,15 @@ do_freq_setup
 				if [ $abort_action -eq 0 ]; then
 					do_lowtv_start
 					[ $abort_action -eq 0 ] && do_status "$OUTPUT_FREQ (picture carrier, $LOWTV_MODE)"
+				fi
+			fi
+			;;
+
+			19\ *) if do_confirm_mic; then
+				do_enter_mic_params
+				if [ $abort_action -eq 0 ]; then
+					do_mic_start
+					[ $abort_action -eq 0 ] && do_status "$OUTPUT_FREQ (FM +-$MIC_DEV_HZ Hz)"
 				fi
 			fi
 			;;
